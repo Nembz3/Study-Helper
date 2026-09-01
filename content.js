@@ -62,12 +62,20 @@
     const optionSet=new Set(options.map(x=>x.toLowerCase()));
     const candidates=lines.filter(x=>{
       const l=x.toLowerCase();
-      return x.length>=8&&x.length<=320&&!optionSet.has(l)&&!NAV.has(l)&&!ACTION_RX.test(x);
+      return x.length>=4&&x.length<=420&&!optionSet.has(l)&&!NAV.has(l)&&!ACTION_RX.test(x)&&!ignored(x);
     });
-    return candidates.find(x=>/\?$/.test(x))||
-      candidates.find(x=>/^(what|which|where|when|why|how|who|name|complete|match|choose|select|fill|type|drag|connect|identify|state|calculate|write|put|sort|order|arrange)\b/i.test(x))||
-      candidates.find(x=>x.length>15&&x.length<180)||
-      "";
+    let index=candidates.findIndex(x=>/\?$/.test(x));
+    if(index<0)index=candidates.findIndex(x=>/^(what|which|where|when|why|how|who|name|complete|match|choose|select|fill|type|drag|connect|identify|state|calculate|write|put|sort|order|arrange)\b/i.test(x));
+    if(index<0)index=candidates.findIndex(x=>x.length>15&&x.length<240);
+    if(index<0)return "";
+
+    const parts=[];
+    for(let i=Math.max(0,index-2);i<=Math.min(candidates.length-1,index+2);i++){
+      const t=candidates[i];
+      if(!t||ACTION_RX.test(t))continue;
+      parts.push(t);
+    }
+    return clean(parts.join(" ")).slice(0,700);
   }
   function extractActivity(root){
     const raw=textOf(root);
@@ -131,29 +139,70 @@
     for(const el of group.querySelectorAll("h1,h2,h3,h4,p,span,div,label")){
       if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
       const r=el.getBoundingClientRect();
-      if(r.top>firstTop+24||r.bottom<Math.max(gr.top,firstTop-700))continue;
+      if(r.top>firstTop+30||r.bottom<Math.max(gr.top,firstTop-850))continue;
       if(r.width<40||r.height<8)continue;
 
       let raw=ownVisibleText(el);
       if(!raw&&el.children.length<=2)raw=clean(el.innerText||el.textContent||"");
-      if(!raw||raw.length>700)continue;
+      if(!raw||raw.length>900)continue;
 
       for(const t of raw.split(/\n+/).map(clean).filter(Boolean)){
         const key=t.toLowerCase();
-        if(seen.has(key)||t.length<8||t.length>320)continue;
-        if(ignored(t)||ACTION_RX.test(t)||NAV.has(key))continue;
-        if(/^(assignment|quiz|wrong answers|how do you want to learn|scroll down to continue)/i.test(t))continue;
+        if(seen.has(key)||t.length<4||t.length>420)continue;
+        if(ignored(t)||NAV.has(key))continue;
+        if(/^(assignment|quiz|wrong answers|how do you want to learn|scroll down to continue)$/i.test(t))continue;
         seen.add(key);
+
         let score=0;
-        if(/\?$/.test(t))score+=12;
-        if(TASK_RX.test(t))score+=7;
-        if(/\b(true|false|statement|correct|incorrect|order|match|following|best|most|least)\b/i.test(t))score+=3;
-        score+=Math.max(0,6-Math.abs(firstTop-r.bottom)/120);
-        candidates.push({t,score,bottom:r.bottom});
+        if(/\?$/.test(t))score+=14;
+        if(TASK_RX.test(t))score+=8;
+        if(/\b(true|false|statement|correct|incorrect|order|match|following|best|most|least)\b/i.test(t))score+=4;
+        if(ACTION_RX.test(t))score-=5;
+        score+=Math.max(0,7-Math.abs(firstTop-r.bottom)/120);
+        candidates.push({t,score,top:r.top,bottom:r.bottom});
       }
     }
-    candidates.sort((a,b)=>b.score-a.score||b.bottom-a.bottom);
-    return candidates[0]?.t||"";
+
+    candidates.sort((a,b)=>a.top-b.top||b.score-a.score);
+
+    // Questions can be split across several DOM elements. Join nearby lines when
+    // they form one block directly above the answer controls.
+    const usable=candidates.filter(x=>x.bottom<=firstTop+30);
+    if(!usable.length)return "";
+
+    let bestIndex=-1,bestScore=-Infinity;
+    for(let i=0;i<usable.length;i++){
+      if(usable[i].score>bestScore){
+        bestScore=usable[i].score;
+        bestIndex=i;
+      }
+    }
+    if(bestIndex<0)return "";
+
+    let first=bestIndex,last=bestIndex;
+    while(first>0&&usable[first].top-usable[first-1].bottom<38&&usable[first-1].bottom>=firstTop-850){
+      const prev=usable[first-1];
+      if(prev.score<1&&prev.t.length<12)break;
+      first--;
+    }
+    while(last+1<usable.length&&usable[last+1].top-usable[last].bottom<38&&usable[last+1].top<=firstTop+20){
+      const next=usable[last+1];
+      if(ACTION_RX.test(next.t))break;
+      last++;
+    }
+
+    const parts=[];
+    const added=new Set();
+    for(let i=first;i<=last;i++){
+      const t=usable[i].t;
+      const k=t.toLowerCase();
+      if(!added.has(k)){added.add(k);parts.push(t);}
+    }
+
+    let joined=clean(parts.join(" "));
+    if(joined.length>=8&&joined.length<=700)return joined;
+
+    return usable[bestIndex]?.t||"";
   }
 
   function focusedActivity(group,controls){
