@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.5.3 — Detection Stability Repair
+- Repaired question-line extraction edge cases
+- Reduced reliance on large nested container text
+- Added a safer fallback for question text extraction
+- Reworked render confirmation so small DOM changes do not repeatedly reset detection
+- Faster observer and polling checks for dynamically rendered activities
+- Preserved duplicate and token-saving protections
+
+## 3.5.2 — Detection Consistency
+- Improved render timing and question detection consistency
+
+
 ## 3.5.1 — Active Question Isolation Fix
 - Replaced broad ancestor scoring with tight answer-control cluster detection
 - Detects groups of nearby answer controls before choosing a question container
