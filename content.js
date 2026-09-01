@@ -126,19 +126,37 @@
   function questionNear(group,controls){
     const firstTop=Math.min(...controls.map(c=>c.getBoundingClientRect().top));
     const gr=group.getBoundingClientRect();
-    const candidates=[];
+    const candidates=[],seen=new Set();
+
+    // Seneca changes its internal wrappers between question types. Instead of relying
+    // only on direct text nodes, inspect visible text blocks immediately above the
+    // answer controls and score individual lines.
     for(const el of group.querySelectorAll("h1,h2,h3,h4,p,span,div,label")){
       if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
       const r=el.getBoundingClientRect();
-      if(r.bottom>firstTop+6||r.top<gr.top-4)continue;
-      const t=ownVisibleText(el)||((el.children.length===0)?textOf(el):"");
-      if(t.length<8||t.length>320||ignored(t)||ACTION_RX.test(t))continue;
-      if(/^(assignment|quiz|wrong answers|how do you want to learn)/i.test(t))continue;
-      candidates.push({t,r});
+      if(r.top>firstTop+24||r.bottom<Math.max(gr.top,firstTop-700))continue;
+      if(r.width<40||r.height<8)continue;
+
+      const raw=ownVisibleText(el)||textOf(el);
+      if(!raw||raw.length>700)continue;
+      for(const t of raw.split(/\n+/).map(clean).filter(Boolean)){
+        const key=t.toLowerCase();
+        if(seen.has(key)||t.length<8||t.length>320)continue;
+        if(ignored(t)||ACTION_RX.test(t)||NAV.has(key))continue;
+        if(/^(assignment|quiz|wrong answers|how do you want to learn|scroll down to continue)/i.test(t))continue;
+        seen.add(key);
+        let score=0;
+        if(/\?$/.test(t))score+=12;
+        if(TASK_RX.test(t))score+=7;
+        if(/\b(true|false|statement|correct|incorrect|order|match|following)\b/i.test(t))score+=3;
+        // Prefer text closest above the answers, but do not require a perfect DOM layout.
+        score+=Math.max(0,6-Math.abs(firstTop-r.bottom)/120);
+        candidates.push({t,score,bottom:r.bottom});
+      }
     }
-    candidates.sort((a,b)=>b.r.bottom-a.r.bottom);
-    const lines=candidates.map(x=>x.t);
-    return findQuestionLine(lines,[])||lines.find(x=>/\?$/.test(x))||"";
+
+    candidates.sort((a,b)=>b.score-a.score||b.bottom-a.bottom);
+    return candidates[0]?.t||"";
   }
 
   function focusedActivity(group,controls){
@@ -146,7 +164,8 @@
     if(raw.length<8||raw.length>1800||ignored(raw))return null;
     const options=uniqueOptions(controls.map(labelOf));
     if(options.length<2)return null;
-    const question=questionNear(group,controls);
+    const lines=(group.innerText||group.textContent||"").split(/\n+/).map(clean).filter(Boolean);
+    const question=questionNear(group,controls)||findQuestionLine(lines,options);
     if(!question)return null;
 
     const cls=classify(group,raw);
@@ -157,7 +176,6 @@
     else if(DRAG_RX.test(raw)||controls.some(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')))type="ordering";
     else type="choice";
 
-    const lines=(group.innerText||group.textContent||"").split(/\n+/).map(clean).filter(Boolean);
     const instruction=lines.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"";
     const activity={type,question,options:options.slice(0,10),instruction,evidence:10};
     activity.signature=signature(activity);
@@ -233,15 +251,21 @@
     finally{analysing=false;}
   }
   function scan(){
-    const now=Date.now();if(now-lastScanAt<700)return;lastScanAt=now;
+    const now=Date.now();if(now-lastScanAt<220)return;lastScanAt=now;
     const activity=detectActivity();
     if(!activity){pending="";pendingSince=0;return;}
     const sig=activity.signature;
-    if(sig!==pending){pending=sig;pendingSince=now;return;}
-    if(now-pendingSince>=650)mount(activity);
+    if(sig!==pending){
+      pending=sig;pendingSince=now;
+      // Confirm the same activity shortly after the first render. This is much faster
+      // and more reliable than waiting for the old multi-second polling interval.
+      setTimeout(scan,280);
+      return;
+    }
+    if(now-pendingSince>=220)mount(activity);
   }
-  const observer=new MutationObserver(()=>{clearTimeout(debounce);debounce=setTimeout(scan,800);});
+  const observer=new MutationObserver(()=>{clearTimeout(debounce);debounce=setTimeout(scan,220);});
   observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
-  addEventListener("scroll",()=>{clearTimeout(debounce);debounce=setTimeout(scan,650)},{passive:true});
-  setTimeout(scan,1400);setInterval(scan,3500);
+  addEventListener("scroll",()=>{clearTimeout(debounce);debounce=setTimeout(scan,220)},{passive:true});
+  setTimeout(scan,700);setInterval(scan,1200);
 })();
