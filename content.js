@@ -15,7 +15,7 @@
     return r.width>20&&r.height>10&&s.display!=="none"&&s.visibility!=="hidden"&&s.opacity!=="0"&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;
   }
   const textOf=el=>clean(el?.innerText||el?.textContent||"");
-  const labelOf=el=>clean(el?.innerText||el?.value||el?.getAttribute?.("aria-label")||el?.getAttribute?.("title")||"");
+  const labelOf=el=>clean(el?.innerText||el?.value||el?.getAttribute?.("aria-label")||el?.getAttribute?.("placeholder")||el?.getAttribute?.("name")||el?.getAttribute?.("title")||"");
   const ignored=t=>IGNORE.some(rx=>rx.test(t));
 
   function controlsIn(root){
@@ -111,13 +111,17 @@
   }
   // Build activities from tight clusters of answer controls, rather than scoring
   // large page ancestors. Seneca often keeps completed and current cards in one DOM tree.
+  const INPUT_SELECTOR='input:not([type="hidden"]),textarea,[contenteditable="true"]';
+  const isTextInput=el=>el?.matches?.(INPUT_SELECTOR);
+
   function answerControl(el){
     if(!visible(el)||el.closest?.("#"+ROOT_ID))return false;
+    if(isTextInput(el))return true;
     const t=clean(labelOf(el)),l=t.toLowerCase();
     if(t.length<1||t.length>260)return false;
     if(NAV.has(l)||/^(submit|check answer|continue|reveal answer|scroll down to continue|switch the toggles|assignment|quiz|wrong answers)$/i.test(t))return false;
     if(/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar|flag|close)$/i.test(t))return false;
-    return el.matches('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]');
+    return el.matches('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]');
   }
 
   function clusterControls(controls){
@@ -134,12 +138,14 @@
   }
 
   function scoreControlCluster(cluster){
-    if(cluster.length<2)return -Infinity;
+    const singleText=cluster.length===1&&isTextInput(cluster[0]);
+    if(cluster.length<2&&!singleText)return -Infinity;
     const rects=cluster.map(x=>x.getBoundingClientRect());
     const top=Math.min(...rects.map(r=>r.top)),bottom=Math.max(...rects.map(r=>r.bottom));
     const widths=rects.map(r=>r.width),avg=widths.reduce((a,b)=>a+b,0)/widths.length;
     const variance=widths.reduce((a,w)=>a+Math.abs(w-avg),0)/widths.length;
     let score=cluster.length*100+Math.max(0,120-variance);
+    if(singleText)score+=180;
     if(top>-50&&bottom<innerHeight+50)score+=80;
     score-=Math.abs((top+bottom)/2-innerHeight*.52)/5;
     return score;
@@ -195,51 +201,79 @@
 
   function focusedActivity(group,controls){
     const raw=textOf(group);
-    if(raw.length<8||raw.length>2500||ignored(raw))return null;
+    if(raw.length<6||raw.length>3000||ignored(raw))return null;
     const answerCluster=getBestControlCluster(controls);
-    if(!answerCluster||answerCluster.length<2)return null;
-    const options=uniqueOptions(answerCluster.map(labelOf).filter(x=>!(/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar)$/i.test(x)||NAV.has(x.toLowerCase()))));
-    if(options.length<2)return null;
+    if(!answerCluster?.length)return null;
+
+    const typedCluster=answerCluster.length===1&&isTextInput(answerCluster[0]);
+    const options=typedCluster
+      ?[]
+      :uniqueOptions(answerCluster.map(labelOf).filter(x=>!(/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar)$/i.test(x)||NAV.has(x.toLowerCase()))));
+
+    if(!typedCluster&&options.length<2)return null;
+
     const lines=(group.innerText||group.textContent||"").split(/\n+/).map(clean).filter(Boolean);
     const question=questionNear(group,answerCluster)||findQuestionLine(lines,options);
     if(!question)return null;
+
     const cls=classify(group,raw);
     let type=cls.type;
     const toggleCount=answerCluster.filter(x=>x.matches('[role="checkbox"],[role="switch"],[aria-pressed="true"],[aria-pressed="false"]')).length;
-    if(toggleCount>=2||/select all that apply|which of these are true|switch the toggles/i.test(raw))type="multi_select";
+    if(typedCluster)type="text_input";
+    else if(toggleCount>=2||/select all that apply|which of these are true|switch the toggles/i.test(raw))type="multi_select";
     else if(DRAG_RX.test(raw)||answerCluster.some(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')))type="ordering";
-    else if(answerCluster.some(x=>x.matches('input:not([type="hidden"]),textarea,[contenteditable="true"]')))type="text_input";
+    else if(answerCluster.some(isTextInput))type="text_input";
     else type="choice";
+
     const instruction=lines.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"";
-    const activity={type,question:clean(question),options:options.slice(0,10),instruction,evidence:15};
+    const activity={type,question:clean(question),options:options.slice(0,10),instruction,evidence:typedCluster?16:15};
     activity.signature=signature(activity);
     return activity;
   }
 
   function detectActivity(){
-    const controls=[...document.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')].filter(answerControl);
-    if(controls.length<2)return null;
+    const controls=[...document.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),textarea,[contenteditable="true"],select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')].filter(answerControl);
+    if(!controls.length)return null;
+
     const candidates=[],seen=new Set();
     for(const seed of controls){
       let el=seed.parentElement;
-      for(let depth=0;el&&depth<9;depth++,el=el.parentElement){
+      for(let depth=0;el&&depth<10;depth++,el=el.parentElement){
         if(seen.has(el)||!visible(el))continue;
         seen.add(el);
+
         const r=el.getBoundingClientRect();
-        if(r.width<180||r.height<60||r.width*r.height>innerWidth*innerHeight*1.8)continue;
+        if(r.width<140||r.height<45||r.width*r.height>innerWidth*innerHeight*2.2)continue;
+
         const local=controls.filter(c=>el.contains(c));
-        if(local.length<2)continue;
-        const activity=focusedActivity(el,local);
-        if(!activity)continue;
-        const cluster=getBestControlCluster(local);
-        if(!cluster?.length)continue;
-        const optionTop=Math.min(...cluster.map(c=>c.getBoundingClientRect().top));
-        const area=r.width*r.height;
-        let rank=activity.evidence*100000-area/10-Math.abs(optionTop-innerHeight*.48)*5+cluster.length*20000;
-        if(r.top>-100&&r.bottom<innerHeight+100)rank+=200000;
-        candidates.push({activity,rank,area,top:r.top});
+        if(!local.length)continue;
+
+        const typedLocal=local.filter(isTextInput);
+        const hasChoiceLike=local.length>=2;
+        if(!hasChoiceLike&&!typedLocal.length)continue;
+
+        // For text-entry questions, evaluate each input as its own answer cluster.
+        const possibleClusters=[];
+        const normal=getBestControlCluster(local);
+        if(normal)possibleClusters.push(normal);
+        for(const input of typedLocal)possibleClusters.push([input]);
+
+        for(const cluster of possibleClusters){
+          const uniqueKey=cluster.map(x=>controls.indexOf(x)).join(",");
+          if(!uniqueKey)continue;
+          const activity=focusedActivity(el,cluster);
+          if(!activity)continue;
+
+          const optionTop=Math.min(...cluster.map(c=>c.getBoundingClientRect().top));
+          const area=r.width*r.height;
+          let rank=activity.evidence*100000-area/12-Math.abs(optionTop-innerHeight*.48)*5+cluster.length*20000;
+          if(activity.type==="text_input")rank+=35000;
+          if(r.top>-120&&r.bottom<innerHeight+120)rank+=200000;
+          candidates.push({activity,rank,area,top:r.top});
+        }
       }
     }
+
     candidates.sort((a,b)=>b.rank-a.rank||a.area-b.area||b.top-a.top);
     return candidates[0]?.activity||null;
   }
@@ -258,7 +292,7 @@
     if(sig===lastSignature&&document.getElementById(ROOT_ID))return;
     lastSignature=sig;dismissedSignature="";removeRoot();
     const root=document.createElement("div");root.id=ROOT_ID;
-    root.innerHTML=`<div class="sh-card"><div class="sh-head"><strong>Study Helper V3.5.3</strong><button class="sh-close" title="Hide this question">×</button></div><div class="sh-label"><span class="sh-type"></span> activity detected</div><div class="sh-question"></div><div class="sh-actions"><button class="sh-hint">Hint</button><button class="sh-explain">Explain</button><button class="sh-answer">Quick answer</button></div><div class="sh-status"></div><div class="sh-response"></div><button class="sh-copy" hidden>Copy answer</button></div>`;
+    root.innerHTML=`<div class="sh-card"><div class="sh-head"><strong>Study Helper V3.6.0</strong><button class="sh-close" title="Hide this question">×</button></div><div class="sh-label"><span class="sh-type"></span> activity detected</div><div class="sh-question"></div><div class="sh-actions"><button class="sh-hint">Hint</button><button class="sh-explain">Explain</button><button class="sh-answer">Quick answer</button></div><div class="sh-status"></div><div class="sh-response"></div><button class="sh-copy" hidden>Copy answer</button></div>`;
     root.querySelector(".sh-type").textContent=activity.type.replace("_"," ");
     root.querySelector(".sh-question").textContent=preview(activity);
     root.querySelector(".sh-close").onclick=()=>{dismissedSignature=sig;root.remove();};
@@ -324,7 +358,7 @@
       pendingSince=now;
       setTimeout(()=>{
         const confirmed=detectActivity();
-        if(confirmed&&confirmed.question&&confirmed.options?.length>=2)mount(confirmed);
+        if(confirmed&&confirmed.question&&(confirmed.type==="text_input"||confirmed.options?.length>=2))mount(confirmed);
       },180);
       return;
     }
