@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.5.9 — Full Question Detection & Logging Update
+- Improved detection of the complete question text instead of truncating questions to short fragments
+- Improved answer-control clustering so real answer options are preferred over unrelated page controls
+- Added filtering for Seneca toolbar actions and unrelated controls such as reporting, reading text, topic notes and toolbar collapse actions
+- Improved nearby-question extraction around answer groups
+- Reduced inconsistent detection caused by dynamic page rendering and changing DOM wrappers
+- Preserved support for choice, multi-select, ordering, text input and dropdown activities
+- Added clearer repository development logging policy
+- README version updated to match the published extension version
+
 ## 3.5.3 — Detection Stability Repair
 - Repaired question-line extraction edge cases
 - Reduced reliance on large nested container text
