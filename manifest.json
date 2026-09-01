@@ -1,10 +1,21 @@
 {
   "manifest_version": 3,
   "name": "Study Helper",
-  "version": "2.0.0",
-  "description": "Personal AI study helper with provider fallback.",
+  "version": "3.0.0",
+  "description": "Personal AI study helper with rapid on-page question detection.",
   "permissions": ["storage", "contextMenus"],
-  "host_permissions": ["https://api.groq.com/*","https://generativelanguage.googleapis.com/*","https://openrouter.ai/*"],
+  "host_permissions": [
+    "https://app.senecalearning.com/*",
+    "https://api.groq.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://openrouter.ai/*"
+  ],
+  "content_scripts": [{
+    "matches": ["https://app.senecalearning.com/*"],
+    "js": ["content.js"],
+    "css": ["content.css"],
+    "run_at": "document_idle"
+  }],
   "background": {"service_worker":"background.js"},
   "action": {"default_popup":"popup.html","default_title":"Study Helper"}
 }
