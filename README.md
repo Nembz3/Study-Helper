@@ -1,10 +1,10 @@
-# Study Helper V3.5
+# Study Helper V3.5.3
 
 Personal AI study helper for Microsoft Edge.
 
 ## What's new in V3.5
 
-V3.5 focuses on two things:
+V3.5.3 focuses on two things:
 
 ### Better activity detection
 The extension now classifies interactive activities instead of treating every large block of page text as a possible question.
