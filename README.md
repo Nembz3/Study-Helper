@@ -1,29 +1,21 @@
-# Study Helper V3.3
+# Study Helper V3.4
 
-Personal Microsoft Edge AI study helper with high-confidence question detection and token-saving AI assistance.
+Personal Microsoft Edge AI study helper with activity-aware question detection.
 
-## V3.3 false-positive fix
-Rapid Mode now requires strong evidence that the current screen is an actual interactive exercise before analysing it.
+## V3.4 activity detection
+Study Helper now supports more than standard multiple-choice and text-input questions.
 
-It ignores common non-question screens such as:
-- course and section pages
-- progress summaries
-- "Up next" screens
-- completion screens
-- memory-strength screens
-- XP and score summaries
-- navigation-only screens
+It can recognise evidence of:
+- multiple-choice questions
+- written-answer questions
+- fill-in activities
+- matching activities
+- drag-and-drop activities
+- ordering and sequencing activities
+- numbered ordering slots
+- sortable/draggable elements
 
-A candidate must also remain stable briefly before it is treated as a question.
-
-## Token-saving safeguards
-- High-confidence question detection
-- Interactive answer-control checks
-- Stable-question confirmation
-- Per-session caching
-- One Rapid Mode analysis per question signature
-- Shorter prompts
-- Limited response length
+The detector also keeps V3.3 protections against false positives from course pages, completion screens, XP summaries and navigation screens.
 
 ## Updating
 Run `update.bat`, reload the extension in `edge://extensions`, then refresh the study page.
