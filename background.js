@@ -51,7 +51,7 @@ async function ask(mode,input){
       // Retry once with an explicit non-empty instruction before falling through to the next provider.
       if(!clean(text)){
         const retryPrompt=prompt+"\nIMPORTANT: Return a non-empty answer using the supplied question and options.";
-        text=p.type==="gemini"?await callGemini(p.key?key:key,model,retryPrompt,maxTokens):await callOpenAI(p,key,model,retryPrompt,maxTokens);
+        text=p.type==="gemini"?await callGemini(key,model,retryPrompt,maxTokens):await callOpenAI(p,key,model,retryPrompt,maxTokens);
       }
       text=clean(text);
       if(!text)throw new Error("Empty response");
