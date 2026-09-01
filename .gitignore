@@ -1,0 +1,7 @@
+# Never commit API keys or local settings
+.env
+*.key
+secrets.json
+local-settings.json
+.DS_Store
+Thumbs.db
