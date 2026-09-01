@@ -1,4 +1,4 @@
-# Study Helper V3.5.9
+# Study Helper V3.6.0
 
 Personal AI study helper for Microsoft Edge.
 
@@ -10,6 +10,7 @@ V3.5.3 focuses on two things:
 The extension now classifies interactive activities instead of treating every large block of page text as a possible question.
 
 Supported activity types include:
+- Single text-input / free-response questions (including placeholder-only inputs)
 - Choice questions
 - Multi-select and toggle questions
 - Text input
