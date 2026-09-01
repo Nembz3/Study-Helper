@@ -32,20 +32,47 @@ function promptFor(mode,input){
   return lines.join("\n");
 }
 async function callOpenAI(p,key,model,prompt,maxTokens){
-  const r=await fetch(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify({model,messages:[{role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Use only the supplied activity data. Do not invent missing options."},{role:"user",content:prompt}],temperature:.1,max_tokens:maxTokens})});
-  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");return clean(d.choices?.[0]?.message?.content||"");
+  const r=await fetch(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify({
+    model,
+    messages:[
+      {role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. Never return a blank response."},
+      {role:"user",content:prompt}
+    ],
+    temperature:.1,
+    max_tokens:maxTokens
+  })});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error?.message||"Request failed");
+
+  const choice=d.choices?.[0]||{};
+  const text=choice.message?.content||choice.text||"";
+  const cleaned=clean(Array.isArray(text)?text.map(x=>typeof x==="string"?x:(x?.text||"")).join(""):text);
+  if(cleaned)return cleaned;
+
+  const reason=choice.finish_reason||d.error?.message||"unknown";
+  throw new Error("Provider returned no text (finish reason: "+reason+")");
 }
 async function callGemini(key,model,prompt,maxTokens){
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
-  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:"You are an accurate, concise UK secondary-school study tutor.\n"+prompt}]}],generationConfig:{temperature:.1,maxOutputTokens:maxTokens}})});
-  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");return clean(d.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"");
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+    contents:[{role:"user",parts:[{text:"You are an accurate, concise UK secondary-school study tutor. Always return plain text and never leave the response blank.\n\n"+prompt}]}],
+    generationConfig:{temperature:.2,maxOutputTokens:maxTokens}
+  })});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error?.message||"Request failed");
+
+  const candidate=d.candidates?.[0];
+  const text=candidate?.content?.parts?.map(x=>x.text||"").join("")||"";
+  const cleaned=clean(text);
+  if(cleaned)return cleaned;
+
+  throw new Error("Provider returned no text (finish reason: "+(candidate?.finishReason||"unknown")+")");
 }
 async function ask(mode,input){
   const settings=await chrome.storage.local.get(fields),activity=normaliseActivity(input),prompt=promptFor(mode,activity),errors=[];
   if(!activity.question)return {ok:false,error:"No question text was detected."};
 
-  // Some small/fast models need more than tiny output budgets before producing visible text.
-  const maxTokens=mode==="hint"?160:mode==="answer"?220:180;
+  const maxTokens=mode==="hint"?180:mode==="answer"?280:220;
 
   for(const p of providers){
     const key=settings[p.key],model=settings[p.model];
@@ -56,34 +83,38 @@ async function ask(mode,input){
         ?callGemini(key,model,text,budget)
         :callOpenAI(p,key,model,text,budget);
 
-      let text=await call(prompt,maxTokens);
-
-      if(!clean(text)){
-        const retryPrompt=prompt+"\nIMPORTANT: Your previous response was empty. Return a short non-empty response now.";
-        text=await call(retryPrompt,Math.max(maxTokens,220));
-      }
-
-      if(!clean(text)){
-        // Final simplified retry avoids mode-specific wording causing an empty completion.
-        const fallbackPrompt="Answer this study question with useful text. Do not return an empty response.\nQuestion: "+activity.question+
+      try{
+        const text=await call(prompt,maxTokens);
+        if(clean(text))return saveResult(activity,text,p.id);
+      }catch(firstError){
+        // Retry once only. This avoids burning through quota on repeated blank responses.
+        const fallbackPrompt="Give a concise, useful answer in plain text. Do not return blank.\nQuestion: "+activity.question+
+          (activity.instruction?"\nInstruction: "+activity.instruction:"")+
           (activity.options.length?"\nOptions:\n"+activity.options.map((x,i)=>(i+1)+". "+x).join("\n"):"");
-        text=await call(fallbackPrompt,240);
+        try{
+          const text=await call(fallbackPrompt,Math.max(maxTokens,300));
+          if(clean(text))return saveResult(activity,text,p.id);
+        }catch(secondError){
+          errors.push(p.id+": "+secondError.message);
+          continue;
+        }
+        errors.push(p.id+": Empty response");
+        continue;
       }
-
-      text=clean(text);
-      if(!text)throw new Error("Empty response after retries");
-
-      const historyText=[activity.question,...activity.options].join(" | ").slice(0,1000);
-      const old=(await chrome.storage.local.get("history")).history||[];
-      const next=[historyText,...old.filter(x=>x!==historyText)].slice(0,12);
-      await chrome.storage.local.set({history:next});
-      return {ok:true,text,provider:p.id};
+      errors.push(p.id+": Empty response");
     }catch(e){
       errors.push(p.id+": "+e.message);
     }
   }
-
   return {ok:false,error:errors.length?errors.join(" | "):"No AI provider is configured."};
+}
+
+async function saveResult(activity,text,provider){
+  const historyText=[activity.question,...activity.options].join(" | ").slice(0,1000);
+  const old=(await chrome.storage.local.get("history")).history||[];
+  const next=[historyText,...old.filter(x=>x!==historyText)].slice(0,12);
+  await chrome.storage.local.set({history:next});
+  return {ok:true,text:clean(text),provider};
 }
 chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
   if(message.type==="study-helper-analyse"){ask(message.mode||"answer",message.activity??message.question).then(sendResponse);return true;}
