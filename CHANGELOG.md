@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.6.0 — Text Input Detection Fix
+- Fixed a major detection gap where questions with a single text input were rejected because the detector required at least two answer controls
+- Text inputs are now recognised even when they only expose placeholder text such as “Type your answer here…”
+- Added dedicated single-input activity handling for Seneca free-response questions
+- Detection confirmation now accepts valid text-input questions without requiring two options
+- Improved control discovery to include textarea and contenteditable answer fields
+- Text-input activities now use the same nearby-question extraction system as multiple-choice questions
+- Increased candidate container depth and relaxed false assumptions about answer-control counts
+- Updated the in-extension version label and manifest to v3.6.0
+- Logged this fix as a new release
+
 ## 3.5.9 — Full Question Detection & Logging Update
 - Improved detection of the complete question text instead of truncating questions to short fragments
 - Improved answer-control clustering so real answer options are preferred over unrelated page controls
