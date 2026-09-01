@@ -74,7 +74,7 @@
     if(raw.length<8||raw.length>2200||ignored(raw))return null;
     const cls=classify(root,raw);
     if(cls.score<5)return null;
-    const lines=raw.split(/\n+/).map(clean).filter(Boolean);
+    const lines=(root.innerText||root.textContent||"").split(/\n+/).map(clean).filter(Boolean);
     const options=cls.labels.length?cls.labels:uniqueOptions(
       lines.filter(x=>x.length>2&&x.length<260&&!/^(submit|check|reveal answer|continue)$/i.test(x))
     );
