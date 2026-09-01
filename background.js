@@ -21,13 +21,14 @@ function normaliseActivity(input){
 function promptFor(mode,input){
   const a=normaliseActivity(input);
   const rules={
-    hint:"Give one useful hint only. Do not give the final answer. Max 45 words.",
-    explain:"Explain how to solve it in short numbered steps. Max 100 words.",
-    answer:"Give the answer first. For multi-select, clearly list every option that should be selected. For ordering, list the exact order. Then give one brief reason. Max 70 words."
+    hint:"Respond with exactly one concrete hint that helps solve the question. Do not leave the response blank. Do not reveal the final answer unless the question itself cannot be solved without it.",
+    explain:"Explain how to solve it in short numbered steps. Be concrete and use the supplied options. Do not leave the response blank.",
+    answer:"Give the best answer directly and explicitly. Start with 'Answer:'. For multi-select, list every option to select. For ordering, give the exact order. Then give one short reason. Do not leave the response blank."
   };
-  const lines=[rules[mode],"Activity type: "+a.type,"Question: "+a.question];
+  const lines=[rules[mode]||rules.answer,"Activity type: "+a.type,"Question: "+a.question];
   if(a.instruction)lines.push("Instruction: "+a.instruction);
   if(a.options.length)lines.push("Options:\n"+a.options.map((x,i)=>(i+1)+". "+x).join("\n"));
+  lines.push("You must return useful text even if some activity details are imperfect.");
   return lines.join("\n");
 }
 async function callOpenAI(p,key,model,prompt,maxTokens){
@@ -42,24 +43,46 @@ async function callGemini(key,model,prompt,maxTokens){
 async function ask(mode,input){
   const settings=await chrome.storage.local.get(fields),activity=normaliseActivity(input),prompt=promptFor(mode,activity),errors=[];
   if(!activity.question)return {ok:false,error:"No question text was detected."};
-  const maxTokens=mode==="hint"?80:mode==="answer"?110:150;
+
+  // Some small/fast models need more than tiny output budgets before producing visible text.
+  const maxTokens=mode==="hint"?160:mode==="answer"?220:180;
+
   for(const p of providers){
-    const key=settings[p.key],model=settings[p.model];if(!key||!model)continue;
+    const key=settings[p.key],model=settings[p.model];
+    if(!key||!model)continue;
+
     try{
-      let text=p.type==="gemini"?await callGemini(key,model,prompt,maxTokens):await callOpenAI(p,key,model,prompt,maxTokens);
-      // Some providers occasionally return a successful but blank/whitespace generation.
-      // Retry once with an explicit non-empty instruction before falling through to the next provider.
+      const call=(text,budget)=>p.type==="gemini"
+        ?callGemini(key,model,text,budget)
+        :callOpenAI(p,key,model,text,budget);
+
+      let text=await call(prompt,maxTokens);
+
       if(!clean(text)){
-        const retryPrompt=prompt+"\nIMPORTANT: Return a non-empty answer using the supplied question and options.";
-        text=p.type==="gemini"?await callGemini(key,model,retryPrompt,maxTokens):await callOpenAI(p,key,model,retryPrompt,maxTokens);
+        const retryPrompt=prompt+"\nIMPORTANT: Your previous response was empty. Return a short non-empty response now.";
+        text=await call(retryPrompt,Math.max(maxTokens,220));
       }
+
+      if(!clean(text)){
+        // Final simplified retry avoids mode-specific wording causing an empty completion.
+        const fallbackPrompt="Answer this study question with useful text. Do not return an empty response.\nQuestion: "+activity.question+
+          (activity.options.length?"\nOptions:\n"+activity.options.map((x,i)=>(i+1)+". "+x).join("\n"):"");
+        text=await call(fallbackPrompt,240);
+      }
+
       text=clean(text);
-      if(!text)throw new Error("Empty response");
+      if(!text)throw new Error("Empty response after retries");
+
       const historyText=[activity.question,...activity.options].join(" | ").slice(0,1000);
-      const old=(await chrome.storage.local.get("history")).history||[],next=[historyText,...old.filter(x=>x!==historyText)].slice(0,12);
-      await chrome.storage.local.set({history:next});return {ok:true,text,provider:p.id};
-    }catch(e){errors.push(p.id+": "+e.message);}
+      const old=(await chrome.storage.local.get("history")).history||[];
+      const next=[historyText,...old.filter(x=>x!==historyText)].slice(0,12);
+      await chrome.storage.local.set({history:next});
+      return {ok:true,text,provider:p.id};
+    }catch(e){
+      errors.push(p.id+": "+e.message);
+    }
   }
+
   return {ok:false,error:errors.length?errors.join(" | "):"No AI provider is configured."};
 }
 chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{
