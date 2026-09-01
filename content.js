@@ -230,7 +230,7 @@
     root.querySelector(".sh-hint").onclick=()=>analyse("hint",activity,root);
     root.querySelector(".sh-explain").onclick=()=>analyse("explain",activity,root);
     root.querySelector(".sh-answer").onclick=()=>analyse("answer",activity,root);
-    root.querySelector(".sh-copy").onclick=async()=>{const t=root.querySelector(".sh-response").textContent;try{await navigator.clipboard.writeText(t);root.querySelector(".sh-copy").textContent="Copied!";setTimeout(()=>root.querySelector(".sh-copy").textContent="Copy answer",1200);}catch(_){}};
+    root.querySelector(".sh-copy").onclick=async()=>{const t=root.querySelector(".sh-response").textContent;try{await navigator.clipboard.writeText(t);root.querySelector(".sh-copy").textContent="Copied!";setTimeout(()=>root.querySelector(".sh-copy").textContent="Copy answer",1200);}catch(e){}};
     document.documentElement.appendChild(root);
     chrome.storage.local.get(["rapidAutoAnalyse"],d=>{if(d.rapidAutoAnalyse&&!rapidAnalysed.has(sig)){rapidAnalysed.add(sig);analyse("answer",activity,root);}});
   }
