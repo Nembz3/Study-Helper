@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.5.1 — Active Question Isolation Fix
+- Replaced broad ancestor scoring with tight answer-control cluster detection
+- Detects groups of nearby answer controls before choosing a question container
+- Extracts the question from text immediately above the answer group
+- Strongly prefers the smallest valid interactive card instead of page/course wrappers
+- Ignores learning-mode cards, navigation controls, completed-question sections and "scroll down" controls
+- Reduces the chance of combining multiple Seneca questions into one AI request
+
+
 ## 3.5.0 — Universal Activity Detection & Token Optimisation
 - Rebuilt activity detection around interactive controls instead of broad page text
 - Added explicit multi-select and toggle activity classification
