@@ -235,17 +235,41 @@
     chrome.storage.local.get(["rapidAutoAnalyse"],d=>{if(d.rapidAutoAnalyse&&!rapidAnalysed.has(sig)){rapidAnalysed.add(sig);analyse("answer",activity,root);}});
   }
   async function analyse(mode,activity,root){
-    if(analysing||!root.isConnected)return;analysing=true;
+    if(!root.isConnected)return;
     const key=mode+"|"+activity.signature,status=root.querySelector(".sh-status"),response=root.querySelector(".sh-response"),copy=root.querySelector(".sh-copy");
-    if(cache.has(key)){status.textContent="Cached result";response.textContent=cache.get(key).text;copy.hidden=mode!=="answer";analysing=false;return;}
-    status.textContent="Analysing compact question…";response.textContent="";copy.hidden=true;
+    if(cache.has(key)){
+      status.textContent="Cached result";
+      response.textContent=cache.get(key).text;
+      copy.hidden=mode!=="answer";
+      return;
+    }
+
+    if(analysing){
+      status.textContent="Please wait for the current response…";
+      return;
+    }
+
+    analysing=true;
+    status.textContent=mode==="hint"?"Getting hint…":mode==="answer"?"Getting quick answer…":"Explaining…";
+    response.textContent="";
+    copy.hidden=true;
+
     try{
       const r=await chrome.runtime.sendMessage({type:"study-helper-analyse",mode,activity});
       if(!r?.ok)throw new Error(r?.error||"Analysis failed");
-      cache.set(key,r);if(cache.size>60)cache.delete(cache.keys().next().value);
-      if(root.isConnected){status.textContent="AI: "+r.provider;response.textContent=r.text;copy.hidden=mode!=="answer";}
-    }catch(e){if(root.isConnected)status.textContent="Error: "+e.message;}
-    finally{analysing=false;}
+      if(!String(r.text||"").trim())throw new Error("AI returned an empty response");
+      cache.set(key,r);
+      if(cache.size>60)cache.delete(cache.keys().next().value);
+      if(root.isConnected){
+        status.textContent="AI: "+r.provider;
+        response.textContent=r.text;
+        copy.hidden=mode!=="answer";
+      }
+    }catch(e){
+      if(root.isConnected)status.textContent="Error: "+e.message;
+    }finally{
+      analysing=false;
+    }
   }
   function scan(){
     const now=Date.now();
