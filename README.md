@@ -1,21 +1,30 @@
-# Study Helper V3.4
+# Study Helper V3.5
 
-Personal Microsoft Edge AI study helper with activity-aware question detection.
+Personal AI study helper for Microsoft Edge.
 
-## V3.4 activity detection
-Study Helper now supports more than standard multiple-choice and text-input questions.
+## What's new in V3.5
 
-It can recognise evidence of:
-- multiple-choice questions
-- written-answer questions
-- fill-in activities
-- matching activities
-- drag-and-drop activities
-- ordering and sequencing activities
-- numbered ordering slots
-- sortable/draggable elements
+V3.5 focuses on two things:
 
-The detector also keeps V3.3 protections against false positives from course pages, completion screens, XP summaries and navigation screens.
+### Better activity detection
+The extension now classifies interactive activities instead of treating every large block of page text as a possible question.
+
+Supported activity types include:
+- Choice questions
+- Multi-select and toggle questions
+- Text input
+- Dropdowns
+- Matching
+- Drag-and-drop ordering
+
+### Lower token usage
+Only compact activity data is sent to the AI:
+- activity type
+- question
+- answer options
+- relevant instruction
+
+Large course containers, progress information and unrelated page text are filtered out.
 
 ## Updating
-Run `update.bat`, reload the extension in `edge://extensions`, then refresh the study page.
+Run `update.bat`, reload the extension at `edge://extensions`, then refresh the study page.
