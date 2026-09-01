@@ -1,42 +1,46 @@
-# Study Helper V3.6.0
+# Study Helper
 
-Personal AI study helper for Microsoft Edge.
+A Microsoft Edge extension that detects questions on Seneca Learning and provides optional AI-powered hints, explanations and answers.
 
-## What's new in V3.5
+## Current version: 3.7.0
 
-V3.5.3 focuses on two things:
+### What's new in 3.7
+- More reliable detection of Seneca questions, including single text-input questions.
+- Better handling of questions split across multiple page elements.
+- Improved protection against detecting Seneca navigation and toolbar text.
+- Support for graph, chart, diagram and image-based questions.
+- Visuals are captured when possible and supplied to compatible AI providers for analysis.
+- Stronger empty-response handling with provider retry/fallback.
+- Built-in diagnostic logging for troubleshooting detection and AI failures.
 
-### Better activity detection
-The extension now classifies interactive activities instead of treating every large block of page text as a possible question.
+### AI providers
+Study Helper supports:
+1. Groq
+2. Gemini
+3. OpenRouter
 
-Supported activity types include:
-- Single text-input / free-response questions (including placeholder-only inputs)
-- Choice questions
-- Multi-select and toggle questions
-- Text input
-- Dropdowns
-- Matching
-- Drag-and-drop ordering
+Provider fallback is automatic when a configured provider fails. For visual questions, use a vision-capable model with Gemini/OpenRouter (or a compatible Groq vision model).
 
-### Lower token usage
-Only compact activity data is sent to the AI:
-- activity type
-- question
-- answer options
-- relevant instruction
+### Diagnostics
+Open the extension popup and expand **Diagnostics & Logging**. You can:
+- See how many events have been logged.
+- Export logs as `study-helper-logs.json`.
+- Clear the diagnostic log.
 
-Large course containers, progress information and unrelated page text are filtered out.
+Logs include detection events, panel actions, AI request status, provider errors/retries and successful responses. API keys are never logged.
 
-## Updating
-Run `update.bat`, reload the extension at `edge://extensions`, then refresh the study page.
+### Important behaviour
+Study Helper provides assistance but keeps control of the actual Seneca work with the user. It does not click answer choices, type into homework fields, reveal answers, continue lessons or submit work.
 
+## Install / update on Microsoft Edge
+1. Download or clone this repository.
+2. Open `edge://extensions`.
+3. Turn on **Developer mode**.
+4. Choose **Load unpacked** and select the project folder.
+5. After an update, click the extension's reload button and refresh the Seneca tab.
 
-## Development logging
+## AI setup
+Open the extension popup and add at least one provider API key and model name. Configure a second provider if you want fallback coverage.
 
-Every published change is tracked in this repository.
-
-- **Git commits** record the exact code changes.
-- **CHANGELOG.md** records user-facing fixes, improvements and releases.
-- **README.md** is kept aligned with the current published version.
-- Bug reports and confirmed fixes are logged in the relevant release entry.
-- Future updates will be committed to GitHub with descriptive commit messages rather than being left as untracked chat-only changes.
+## Rapid Mode
+Enable **Rapid Mode** to automatically request an answer when a new question is detected.
