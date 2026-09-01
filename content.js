@@ -112,148 +112,134 @@
   // Build activities from tight clusters of answer controls, rather than scoring
   // large page ancestors. Seneca often keeps completed and current cards in one DOM tree.
   function answerControl(el){
-    if(!visible(el))return false;
-    const t=clean(labelOf(el));
-    if(t.length<2||t.length>260)return false;
-    const l=t.toLowerCase();
+    if(!visible(el)||el.closest?.("#"+ROOT_ID))return false;
+    const t=clean(labelOf(el)),l=t.toLowerCase();
+    if(t.length<1||t.length>260)return false;
     if(NAV.has(l)||/^(submit|check answer|continue|reveal answer|scroll down to continue|switch the toggles|assignment|quiz|wrong answers)$/i.test(t))return false;
-    if(el.closest?.("#"+ROOT_ID))return false;
+    if(/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar|flag|close)$/i.test(t))return false;
     return el.matches('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]');
   }
 
-  function ownVisibleText(el){
-    if(!visible(el))return "";
-    let t="";
-    for(const n of el.childNodes){
-      if(n.nodeType===Node.TEXT_NODE)t+=" "+n.textContent;
+  function clusterControls(controls){
+    if(!controls.length)return [];
+    const sorted=[...controls].sort((a,b)=>a.getBoundingClientRect().top-b.getBoundingClientRect().top);
+    const clusters=[];let current=[sorted[0]];
+    for(let i=1;i<sorted.length;i++){
+      const prev=sorted[i-1].getBoundingClientRect(),now=sorted[i].getBoundingClientRect();
+      if(now.top-prev.bottom>95){clusters.push(current);current=[sorted[i]];}
+      else current.push(sorted[i]);
     }
-    t=clean(t);
-    return t;
+    if(current.length)clusters.push(current);
+    return clusters;
+  }
+
+  function scoreControlCluster(cluster){
+    if(cluster.length<2)return -Infinity;
+    const rects=cluster.map(x=>x.getBoundingClientRect());
+    const top=Math.min(...rects.map(r=>r.top)),bottom=Math.max(...rects.map(r=>r.bottom));
+    const widths=rects.map(r=>r.width),avg=widths.reduce((a,b)=>a+b,0)/widths.length;
+    const variance=widths.reduce((a,w)=>a+Math.abs(w-avg),0)/widths.length;
+    let score=cluster.length*100+Math.max(0,120-variance);
+    if(top>-50&&bottom<innerHeight+50)score+=80;
+    score-=Math.abs((top+bottom)/2-innerHeight*.52)/5;
+    return score;
+  }
+
+  function getBestControlCluster(controls){
+    let best=null,bestScore=-Infinity;
+    for(const cluster of clusterControls(controls)){
+      const score=scoreControlCluster(cluster);
+      if(score>bestScore){bestScore=score;best=cluster;}
+    }
+    return best;
+  }
+
+  function getTextCandidates(group,firstOptionTop){
+    const gr=group.getBoundingClientRect(),out=[],seen=new Set();
+    for(const el of group.querySelectorAll("h1,h2,h3,h4,h5,h6,p,span,div,label,article,section")){
+      if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
+      const r=el.getBoundingClientRect();
+      if(r.top>firstOptionTop+15||r.bottom<Math.max(gr.top,firstOptionTop-750)||r.width<40||r.height<8)continue;
+      if(el.querySelector('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input,select'))continue;
+      const raw=clean(el.innerText||el.textContent||"");
+      if(!raw||raw.length<6||raw.length>500)continue;
+      const key=raw.toLowerCase();
+      if(seen.has(key)||ignored(raw)||ACTION_RX.test(raw))continue;
+      if(/^(assignment|quiz|wrong answers|how do you want to learn|scroll down to continue|report a problem|start reading text|topic notes|collapse toolbar)$/i.test(raw))continue;
+      seen.add(key);
+      let score=0;
+      if(/\?$/.test(raw))score+=30;
+      if(TASK_RX.test(raw))score+=15;
+      if(/\b(true|false|correct|incorrect|following|statement|speed|calculate|distance|time|graph|best|most|least)\b/i.test(raw))score+=5;
+      score+=Math.max(0,20-Math.max(0,firstOptionTop-r.bottom)/30);
+      if(raw.length>15&&raw.length<250)score+=8;
+      out.push({text:raw,score,top:r.top,bottom:r.bottom});
+    }
+    return out;
   }
 
   function questionNear(group,controls){
+    if(!controls?.length)return "";
     const firstTop=Math.min(...controls.map(c=>c.getBoundingClientRect().top));
-    const gr=group.getBoundingClientRect();
-    const candidates=[],seen=new Set();
-
-    for(const el of group.querySelectorAll("h1,h2,h3,h4,p,span,div,label")){
-      if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
-      const r=el.getBoundingClientRect();
-      if(r.top>firstTop+30||r.bottom<Math.max(gr.top,firstTop-850))continue;
-      if(r.width<40||r.height<8)continue;
-
-      let raw=ownVisibleText(el);
-      if(!raw&&el.children.length<=2)raw=clean(el.innerText||el.textContent||"");
-      if(!raw||raw.length>900)continue;
-
-      for(const t of raw.split(/\n+/).map(clean).filter(Boolean)){
-        const key=t.toLowerCase();
-        if(seen.has(key)||t.length<4||t.length>420)continue;
-        if(ignored(t)||NAV.has(key))continue;
-        if(/^(assignment|quiz|wrong answers|how do you want to learn|scroll down to continue)$/i.test(t))continue;
-        seen.add(key);
-
-        let score=0;
-        if(/\?$/.test(t))score+=14;
-        if(TASK_RX.test(t))score+=8;
-        if(/\b(true|false|statement|correct|incorrect|order|match|following|best|most|least)\b/i.test(t))score+=4;
-        if(ACTION_RX.test(t))score-=5;
-        score+=Math.max(0,7-Math.abs(firstTop-r.bottom)/120);
-        candidates.push({t,score,top:r.top,bottom:r.bottom});
-      }
+    const candidates=getTextCandidates(group,firstTop);
+    if(!candidates.length)return "";
+    candidates.sort((a,b)=>b.score-a.score||b.bottom-a.bottom||b.text.length-a.text.length);
+    const best=candidates[0];
+    const nearby=candidates.filter(x=>x.score>=best.score-8&&x.bottom<=firstTop+10&&x.top>=best.top-120&&x.top<=best.bottom+120).sort((a,b)=>a.top-b.top);
+    if(nearby.length>1){
+      const combined=clean([...new Set(nearby.map(x=>x.text))].join(" "));
+      if(combined.length>=best.text.length&&combined.length<=400)return combined;
     }
-
-    candidates.sort((a,b)=>a.top-b.top||b.score-a.score);
-
-    // Questions can be split across several DOM elements. Join nearby lines when
-    // they form one block directly above the answer controls.
-    const usable=candidates.filter(x=>x.bottom<=firstTop+30);
-    if(!usable.length)return "";
-
-    let bestIndex=-1,bestScore=-Infinity;
-    for(let i=0;i<usable.length;i++){
-      if(usable[i].score>bestScore){
-        bestScore=usable[i].score;
-        bestIndex=i;
-      }
-    }
-    if(bestIndex<0)return "";
-
-    let first=bestIndex,last=bestIndex;
-    while(first>0&&usable[first].top-usable[first-1].bottom<38&&usable[first-1].bottom>=firstTop-850){
-      const prev=usable[first-1];
-      if(prev.score<1&&prev.t.length<12)break;
-      first--;
-    }
-    while(last+1<usable.length&&usable[last+1].top-usable[last].bottom<38&&usable[last+1].top<=firstTop+20){
-      const next=usable[last+1];
-      if(ACTION_RX.test(next.t))break;
-      last++;
-    }
-
-    const parts=[];
-    const added=new Set();
-    for(let i=first;i<=last;i++){
-      const t=usable[i].t;
-      const k=t.toLowerCase();
-      if(!added.has(k)){added.add(k);parts.push(t);}
-    }
-
-    let joined=clean(parts.join(" "));
-    if(joined.length>=8&&joined.length<=700)return joined;
-
-    return usable[bestIndex]?.t||"";
+    return best.text;
   }
 
   function focusedActivity(group,controls){
     const raw=textOf(group);
-    if(raw.length<8||raw.length>1800||ignored(raw))return null;
-    const options=uniqueOptions(controls.map(labelOf));
+    if(raw.length<8||raw.length>2500||ignored(raw))return null;
+    const answerCluster=getBestControlCluster(controls);
+    if(!answerCluster||answerCluster.length<2)return null;
+    const options=uniqueOptions(answerCluster.map(labelOf).filter(x=>!(/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar)$/i.test(x)||NAV.has(x.toLowerCase()))));
     if(options.length<2)return null;
     const lines=(group.innerText||group.textContent||"").split(/\n+/).map(clean).filter(Boolean);
-    const question=questionNear(group,controls)||findQuestionLine(lines,options);
+    const question=questionNear(group,answerCluster)||findQuestionLine(lines,options);
     if(!question)return null;
-
     const cls=classify(group,raw);
     let type=cls.type;
-    const lower=raw.toLowerCase();
-    const toggleCount=controls.filter(x=>x.matches('[role="checkbox"],[role="switch"],[aria-pressed="true"],[aria-pressed="false"]')).length;
+    const toggleCount=answerCluster.filter(x=>x.matches('[role="checkbox"],[role="switch"],[aria-pressed="true"],[aria-pressed="false"]')).length;
     if(toggleCount>=2||/select all that apply|which of these are true|switch the toggles/i.test(raw))type="multi_select";
-    else if(DRAG_RX.test(raw)||controls.some(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')))type="ordering";
+    else if(DRAG_RX.test(raw)||answerCluster.some(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')))type="ordering";
+    else if(answerCluster.some(x=>x.matches('input:not([type="hidden"]),textarea,[contenteditable="true"]')))type="text_input";
     else type="choice";
-
     const instruction=lines.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"";
-    const activity={type,question,options:options.slice(0,10),instruction,evidence:10};
+    const activity={type,question:clean(question),options:options.slice(0,10),instruction,evidence:15};
     activity.signature=signature(activity);
     return activity;
   }
 
   function detectActivity(){
     const controls=[...document.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')].filter(answerControl);
-
-    // Prefer clusters currently in the viewport. A cluster must have multiple answer-like
-    // controls and a nearby question directly above it.
+    if(controls.length<2)return null;
     const candidates=[],seen=new Set();
     for(const seed of controls){
       let el=seed.parentElement;
-      for(let depth=0;el&&depth<7;depth++,el=el.parentElement){
+      for(let depth=0;el&&depth<9;depth++,el=el.parentElement){
         if(seen.has(el)||!visible(el))continue;
         seen.add(el);
         const r=el.getBoundingClientRect();
-        if(r.width<180||r.height<70||r.width*r.height>innerWidth*innerHeight*1.35)continue;
+        if(r.width<180||r.height<60||r.width*r.height>innerWidth*innerHeight*1.8)continue;
         const local=controls.filter(c=>el.contains(c));
-        if(local.length<2||local.length>12)continue;
+        if(local.length<2)continue;
         const activity=focusedActivity(el,local);
         if(!activity)continue;
-        const optionTop=Math.min(...local.map(c=>c.getBoundingClientRect().top));
+        const cluster=getBestControlCluster(local);
+        if(!cluster?.length)continue;
+        const optionTop=Math.min(...cluster.map(c=>c.getBoundingClientRect().top));
         const area=r.width*r.height;
-        const viewportBonus=(r.top>=-20&&r.bottom<=innerHeight+20)?500000:0;
-        // Smaller valid containers are strongly preferred, preventing page/course wrappers.
-        const rank=viewportBonus+activity.evidence*100000-area/8-Math.abs(optionTop-innerHeight*.5);
+        let rank=activity.evidence*100000-area/10-Math.abs(optionTop-innerHeight*.48)*5+cluster.length*20000;
+        if(r.top>-100&&r.bottom<innerHeight+100)rank+=200000;
         candidates.push({activity,rank,area,top:r.top});
       }
     }
-
     candidates.sort((a,b)=>b.rank-a.rank||a.area-b.area||b.top-a.top);
     return candidates[0]?.activity||null;
   }
