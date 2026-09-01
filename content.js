@@ -101,27 +101,96 @@
     const area=r.width*r.height;
     return {root,activity,rank:activity.evidence*1000000-area/50-center};
   }
-  function detectActivity(){
-    const seeds=[];
-    for(const el of [...document.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),textarea,[contenteditable="true"],select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')]){
-      if(!visible(el))continue;
-      const label=labelOf(el),parentText=textOf(el.parentElement);
-      if(!label&&!parentText)continue;
-      seeds.push(el);
+  // Build activities from tight clusters of answer controls, rather than scoring
+  // large page ancestors. Seneca often keeps completed and current cards in one DOM tree.
+  function answerControl(el){
+    if(!visible(el))return false;
+    const t=clean(labelOf(el));
+    if(t.length<2||t.length>260)return false;
+    const l=t.toLowerCase();
+    if(NAV.has(l)||/^(submit|check answer|continue|reveal answer|scroll down to continue|switch the toggles|assignment|quiz|wrong answers)$/i.test(t))return false;
+    if(el.closest?.("#"+ROOT_ID))return false;
+    return el.matches('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]');
+  }
+
+  function ownVisibleText(el){
+    if(!visible(el))return "";
+    let t="";
+    for(const n of el.childNodes){
+      if(n.nodeType===Node.TEXT_NODE)t+=" "+n.textContent;
     }
-    const seen=new Set(),candidates=[];
-    for(const seed of seeds){
+    t=clean(t);
+    return t;
+  }
+
+  function questionNear(group,controls){
+    const firstTop=Math.min(...controls.map(c=>c.getBoundingClientRect().top));
+    const gr=group.getBoundingClientRect();
+    const candidates=[];
+    for(const el of group.querySelectorAll("h1,h2,h3,h4,p,span,div,label")){
+      if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
+      const r=el.getBoundingClientRect();
+      if(r.bottom>firstTop+6||r.top<gr.top-4)continue;
+      const t=ownVisibleText(el)||((el.children.length===0)?textOf(el):"");
+      if(t.length<8||t.length>320||ignored(t)||ACTION_RX.test(t))continue;
+      if(/^(assignment|quiz|wrong answers|how do you want to learn)/i.test(t))continue;
+      candidates.push({t,r});
+    }
+    candidates.sort((a,b)=>b.r.bottom-a.r.bottom);
+    const lines=candidates.map(x=>x.t);
+    return findQuestionLine(lines,[])||lines.find(x=>/\?$/.test(x))||"";
+  }
+
+  function focusedActivity(group,controls){
+    const raw=textOf(group);
+    if(raw.length<8||raw.length>1800||ignored(raw))return null;
+    const options=uniqueOptions(controls.map(labelOf));
+    if(options.length<2)return null;
+    const question=questionNear(group,controls);
+    if(!question)return null;
+
+    const cls=classify(group,raw);
+    let type=cls.type;
+    const lower=raw.toLowerCase();
+    const toggleCount=controls.filter(x=>x.matches('[role="checkbox"],[role="switch"],[aria-pressed="true"],[aria-pressed="false"]')).length;
+    if(toggleCount>=2||/select all that apply|which of these are true|switch the toggles/i.test(raw))type="multi_select";
+    else if(DRAG_RX.test(raw)||controls.some(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')))type="ordering";
+    else type="choice";
+
+    const lines=(group.innerText||group.textContent||"").split(/\n+/).map(clean).filter(Boolean);
+    const instruction=lines.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"";
+    const activity={type,question,options:options.slice(0,10),instruction,evidence:10};
+    activity.signature=signature(activity);
+    return activity;
+  }
+
+  function detectActivity(){
+    const controls=[...document.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')].filter(answerControl);
+
+    // Prefer clusters currently in the viewport. A cluster must have multiple answer-like
+    // controls and a nearby question directly above it.
+    const candidates=[],seen=new Set();
+    for(const seed of controls){
       let el=seed.parentElement;
-      for(let depth=0;el&&depth<9;depth++,el=el.parentElement){
+      for(let depth=0;el&&depth<7;depth++,el=el.parentElement){
         if(seen.has(el)||!visible(el))continue;
         seen.add(el);
-        const t=textOf(el);
-        if(t.length>2200)break;
-        const scored=scoreRoot(el);
-        if(scored)candidates.push(scored);
+        const r=el.getBoundingClientRect();
+        if(r.width<180||r.height<70||r.width*r.height>innerWidth*innerHeight*1.35)continue;
+        const local=controls.filter(c=>el.contains(c));
+        if(local.length<2||local.length>12)continue;
+        const activity=focusedActivity(el,local);
+        if(!activity)continue;
+        const optionTop=Math.min(...local.map(c=>c.getBoundingClientRect().top));
+        const area=r.width*r.height;
+        const viewportBonus=(r.top>=-20&&r.bottom<=innerHeight+20)?500000:0;
+        // Smaller valid containers are strongly preferred, preventing page/course wrappers.
+        const rank=viewportBonus+activity.evidence*100000-area/8-Math.abs(optionTop-innerHeight*.5);
+        candidates.push({activity,rank,area,top:r.top});
       }
     }
-    candidates.sort((a,b)=>b.rank-a.rank||a.root.getBoundingClientRect().width-b.root.getBoundingClientRect().width);
+
+    candidates.sort((a,b)=>b.rank-a.rank||a.area-b.area||b.top-a.top);
     return candidates[0]?.activity||null;
   }
   function signature(a){
