@@ -128,17 +128,16 @@
     const gr=group.getBoundingClientRect();
     const candidates=[],seen=new Set();
 
-    // Seneca changes its internal wrappers between question types. Instead of relying
-    // only on direct text nodes, inspect visible text blocks immediately above the
-    // answer controls and score individual lines.
     for(const el of group.querySelectorAll("h1,h2,h3,h4,p,span,div,label")){
       if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
       const r=el.getBoundingClientRect();
       if(r.top>firstTop+24||r.bottom<Math.max(gr.top,firstTop-700))continue;
       if(r.width<40||r.height<8)continue;
 
-      const raw=ownVisibleText(el)||textOf(el);
+      let raw=ownVisibleText(el);
+      if(!raw&&el.children.length<=2)raw=clean(el.innerText||el.textContent||"");
       if(!raw||raw.length>700)continue;
+
       for(const t of raw.split(/\n+/).map(clean).filter(Boolean)){
         const key=t.toLowerCase();
         if(seen.has(key)||t.length<8||t.length>320)continue;
@@ -148,13 +147,11 @@
         let score=0;
         if(/\?$/.test(t))score+=12;
         if(TASK_RX.test(t))score+=7;
-        if(/\b(true|false|statement|correct|incorrect|order|match|following)\b/i.test(t))score+=3;
-        // Prefer text closest above the answers, but do not require a perfect DOM layout.
+        if(/\b(true|false|statement|correct|incorrect|order|match|following|best|most|least)\b/i.test(t))score+=3;
         score+=Math.max(0,6-Math.abs(firstTop-r.bottom)/120);
         candidates.push({t,score,bottom:r.bottom});
       }
     }
-
     candidates.sort((a,b)=>b.score-a.score||b.bottom-a.bottom);
     return candidates[0]?.t||"";
   }
@@ -226,7 +223,7 @@
     if(sig===lastSignature&&document.getElementById(ROOT_ID))return;
     lastSignature=sig;dismissedSignature="";removeRoot();
     const root=document.createElement("div");root.id=ROOT_ID;
-    root.innerHTML=`<div class="sh-card"><div class="sh-head"><strong>Study Helper V3.5</strong><button class="sh-close" title="Hide this question">×</button></div><div class="sh-label"><span class="sh-type"></span> activity detected</div><div class="sh-question"></div><div class="sh-actions"><button class="sh-hint">Hint</button><button class="sh-explain">Explain</button><button class="sh-answer">Quick answer</button></div><div class="sh-status"></div><div class="sh-response"></div><button class="sh-copy" hidden>Copy answer</button></div>`;
+    root.innerHTML=`<div class="sh-card"><div class="sh-head"><strong>Study Helper V3.5.3</strong><button class="sh-close" title="Hide this question">×</button></div><div class="sh-label"><span class="sh-type"></span> activity detected</div><div class="sh-question"></div><div class="sh-actions"><button class="sh-hint">Hint</button><button class="sh-explain">Explain</button><button class="sh-answer">Quick answer</button></div><div class="sh-status"></div><div class="sh-response"></div><button class="sh-copy" hidden>Copy answer</button></div>`;
     root.querySelector(".sh-type").textContent=activity.type.replace("_"," ");
     root.querySelector(".sh-question").textContent=preview(activity);
     root.querySelector(".sh-close").onclick=()=>{dismissedSignature=sig;root.remove();};
@@ -251,21 +248,32 @@
     finally{analysing=false;}
   }
   function scan(){
-    const now=Date.now();if(now-lastScanAt<220)return;lastScanAt=now;
+    const now=Date.now();
+    if(now-lastScanAt<180)return;
+    lastScanAt=now;
     const activity=detectActivity();
-    if(!activity){pending="";pendingSince=0;return;}
-    const sig=activity.signature;
-    if(sig!==pending){
-      pending=sig;pendingSince=now;
-      // Confirm the same activity shortly after the first render. This is much faster
-      // and more reliable than waiting for the old multi-second polling interval.
-      setTimeout(scan,280);
+
+    if(!activity){
+      pending="";
+      pendingSince=0;
       return;
     }
-    if(now-pendingSince>=220)mount(activity);
+
+    const sig=activity.signature;
+    if(sig!==pending){
+      pending=sig;
+      pendingSince=now;
+      setTimeout(()=>{
+        const confirmed=detectActivity();
+        if(confirmed&&confirmed.question&&confirmed.options?.length>=2)mount(confirmed);
+      },180);
+      return;
+    }
+
+    if(now-pendingSince>=180)mount(activity);
   }
-  const observer=new MutationObserver(()=>{clearTimeout(debounce);debounce=setTimeout(scan,220);});
+  const observer=new MutationObserver(()=>{clearTimeout(debounce);debounce=setTimeout(scan,180);});
   observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
-  addEventListener("scroll",()=>{clearTimeout(debounce);debounce=setTimeout(scan,220)},{passive:true});
-  setTimeout(scan,700);setInterval(scan,1200);
+  addEventListener("scroll",()=>{clearTimeout(debounce);debounce=setTimeout(scan,180)},{passive:true});
+  setTimeout(scan,500);setInterval(scan,900);
 })();
