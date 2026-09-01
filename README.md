@@ -1,20 +1,29 @@
-# Study Helper V3.2
+# Study Helper V3.3
 
-Personal Microsoft Edge AI study helper with rapid question detection and token-saving AI assistance.
+Personal Microsoft Edge AI study helper with high-confidence question detection and token-saving AI assistance.
 
-## Rapid Assist
-- Detects newly visible questions
-- Can automatically analyse each new question once
-- Shows concise answer recommendations
-- Lets you copy written responses
-- Avoids repeating API calls for the same question
+## V3.3 false-positive fix
+Rapid Mode now requires strong evidence that the current screen is an actual interactive exercise before analysing it.
 
-## Token-saving improvements
+It ignores common non-question screens such as:
+- course and section pages
+- progress summaries
+- "Up next" screens
+- completion screens
+- memory-strength screens
+- XP and score summaries
+- navigation-only screens
+
+A candidate must also remain stable briefly before it is treated as a question.
+
+## Token-saving safeguards
+- High-confidence question detection
+- Interactive answer-control checks
+- Stable-question confirmation
+- Per-session caching
+- One Rapid Mode analysis per question signature
 - Shorter prompts
-- Smaller extracted context
 - Limited response length
-- Session caching
-- Duplicate analysis prevention
 
 ## Updating
 Run `update.bat`, reload the extension in `edge://extensions`, then refresh the study page.
