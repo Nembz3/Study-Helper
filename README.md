@@ -1,34 +1,27 @@
-# Study Helper V2
+# Study Helper V3
 
-Personal Microsoft Edge AI study helper.
+Personal Microsoft Edge AI study helper with rapid on-page question detection.
 
-## Features
-- Highlight text on a webpage and right-click **Ask Study Helper about this**
-- Hint mode
-- Step-by-step explanation mode
-- Answer mode
-- Groq primary provider
-- Gemini fallback
-- OpenRouter fallback
-- Automatic fallback if a configured provider errors or rate-limits
+## V3 features
+- Detects changing question content on supported Seneca pages
+- Shows a floating Study Helper panel
+- Hint, Explain and Analyse Answer modes
+- Optional Rapid Mode that automatically starts AI analysis when a new question is detected
+- Groq → Gemini → OpenRouter fallback
 - Recent-question history
 - API keys stored locally in extension storage
 
-## Install on Microsoft Edge
-1. Clone or download the repository.
+## Important behaviour
+V3 reads visible question content and gives AI assistance. It does not click answer buttons, type into homework fields, press reveal/continue, or submit work.
+
+## Install / update on Edge
+1. In the project folder, run `update.bat`.
 2. Open `edge://extensions`.
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select the project folder.
-6. Pin Study Helper.
+3. Find Study Helper and click the reload icon.
+4. Refresh the Seneca tab.
 
 ## AI setup
-Open the extension → **AI Providers & Settings** and add one or more API keys.
+Open the extension popup and add at least one API key. Configure additional providers for fallback.
 
-## Updating
-If cloned with Git, double-click `update.bat`.
-
-## Security
-Never commit API keys to GitHub. Keys are stored locally in browser extension storage.
-
-Provider quotas can change; no free API is guaranteed unlimited.
+## Rapid Mode
+Enable **Rapid Mode** in the popup if you want each newly detected question to be analysed automatically.
