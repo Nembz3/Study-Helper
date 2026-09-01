@@ -32,12 +32,12 @@ function promptFor(mode,input){
 }
 async function callOpenAI(p,key,model,prompt,maxTokens){
   const r=await fetch(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify({model,messages:[{role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Use only the supplied activity data. Do not invent missing options."},{role:"user",content:prompt}],temperature:.1,max_tokens:maxTokens})});
-  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");return d.choices?.[0]?.message?.content;
+  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");return clean(d.choices?.[0]?.message?.content||"");
 }
 async function callGemini(key,model,prompt,maxTokens){
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
   const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{parts:[{text:"You are an accurate, concise UK secondary-school study tutor.\n"+prompt}]}],generationConfig:{temperature:.1,maxOutputTokens:maxTokens}})});
-  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");return d.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("");
+  const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");return clean(d.candidates?.[0]?.content?.parts?.map(x=>x.text||"").join("")||"");
 }
 async function ask(mode,input){
   const settings=await chrome.storage.local.get(fields),activity=normaliseActivity(input),prompt=promptFor(mode,activity),errors=[];
@@ -46,7 +46,14 @@ async function ask(mode,input){
   for(const p of providers){
     const key=settings[p.key],model=settings[p.model];if(!key||!model)continue;
     try{
-      const text=p.type==="gemini"?await callGemini(key,model,prompt,maxTokens):await callOpenAI(p,key,model,prompt,maxTokens);
+      let text=p.type==="gemini"?await callGemini(key,model,prompt,maxTokens):await callOpenAI(p,key,model,prompt,maxTokens);
+      // Some providers occasionally return a successful but blank/whitespace generation.
+      // Retry once with an explicit non-empty instruction before falling through to the next provider.
+      if(!clean(text)){
+        const retryPrompt=prompt+"\nIMPORTANT: Return a non-empty answer using the supplied question and options.";
+        text=p.type==="gemini"?await callGemini(p.key?key:key,model,retryPrompt,maxTokens):await callOpenAI(p,key,model,retryPrompt,maxTokens);
+      }
+      text=clean(text);
       if(!text)throw new Error("Empty response");
       const historyText=[activity.question,...activity.options].join(" | ").slice(0,1000);
       const old=(await chrome.storage.local.get("history")).history||[],next=[historyText,...old.filter(x=>x!==historyText)].slice(0,12);
