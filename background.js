@@ -1,10 +1,12 @@
-const VERSION="3.9.0";
+const VERSION="4.0.0";
 const PROVIDERS=[
   {id:"Groq",key:"groqKey",model:"groqModel",type:"openai",url:"https://api.groq.com/openai/v1/chat/completions"},
   {id:"Gemini",key:"geminiKey",model:"geminiModel",type:"gemini"},
   {id:"OpenRouter",key:"openrouterKey",model:"openrouterModel",type:"openai",url:"https://openrouter.ai/api/v1/chat/completions"}
 ];
 const clean=s=>(s||"").replace(/\s+/g," ").trim();
+const GROQ_VISION_MODELS=new Set(["qwen/qwen3.6-27b","qwen/qwen3.8-27b"]);
+const GEMINI_MIGRATIONS={"gemini-2.0-flash":"gemini-3.6-flash","gemini-2.0-flash-001":"gemini-3.6-flash","gemini-2.0-flash-lite":"gemini-3.1-flash-lite","gemini-2.0-flash-lite-001":"gemini-3.1-flash-lite"};
 async function safeLog(event,data={}){try{const d=await chrome.storage.local.get("studyHelperLogs"),logs=Array.isArray(d.studyHelperLogs)?d.studyHelperLogs:[];logs.push({time:new Date().toISOString(),event,data});await chrome.storage.local.set({studyHelperLogs:logs.slice(-500)});}catch{}}
 function normaliseActivity(input){
   if(typeof input==="string")return {type:"manual",question:clean(input).slice(0,1600),options:[],instruction:"",visualInputs:[]};
@@ -30,7 +32,7 @@ async function callGemini(key,model,prompt,maxTokens,visuals){
   const parts=[{text:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. Focus on the Seneca question card and ignore browser chrome, sidebars and extension UI.\n\n"+prompt}];
   for(const v of visuals){if(v.type==="data"){const m=String(v.data).match(/^data:([^;]+);base64,(.+)$/s);if(m)parts.push({inlineData:{mimeType:m[1],data:m[2]}});}}
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
-  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0.15,maxOutputTokens:maxTokens}})});
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{maxOutputTokens:maxTokens}})});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`Gemini: ${j?.error?.message||r.statusText||r.status}`);
   const text=(j?.candidates||[]).flatMap(c=>c?.content?.parts||[]).map(x=>x?.text||"").join(" ");if(!clean(text))throw new Error("Gemini: Empty response");return clean(text);
 }
@@ -40,7 +42,10 @@ async function ask(mode,input){
   const settings=await loadSettings();await safeLog("request_started",{mode,type:a.type,question:a.question,optionCount:a.options.length,visualCount:a.visualInputs.length});
   const base=promptFor(mode,a),budgets=[700,1000];let lastErr="";
   for(const p of PROVIDERS){
-    const key=settings[p.key],model=settings[p.model];if(!key||!model){await safeLog("provider_skipped",{provider:p.id,reason:"not_configured"});continue;}
+    let key=settings[p.key],model=settings[p.model];
+    if(p.id==="Gemini"&&GEMINI_MIGRATIONS[model]){const migrated=GEMINI_MIGRATIONS[model];await chrome.storage.local.set({[p.model]:migrated});await safeLog("model_migrated",{provider:p.id,from:model,to:migrated});model=migrated;}
+    if(!key||!model){await safeLog("provider_skipped",{provider:p.id,reason:"not_configured"});continue;}
+    if(a.visualInputs.length&&p.id==="Groq"&&!GROQ_VISION_MODELS.has(model)){await safeLog("provider_skipped",{provider:p.id,model,reason:"model_has_no_vision"});continue;}
     for(let attempt=0;attempt<2;attempt++){
       try{
         const prompt=attempt?base+"\nBe concise but complete; do not omit the answer or explanation.":base;
