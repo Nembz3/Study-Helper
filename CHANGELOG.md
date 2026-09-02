@@ -2,6 +2,11 @@
 
 ## V4.1.0
 
+### Detection fallback
+- Added a second lightweight recovery detector that can surface a study activity when the main detector misses a Seneca card.
+- Recovery detection covers text-entry, choice, multi-select and common keyboard/data-attribute controls.
+- Recovery detection now preserves basic image/canvas/SVG metadata for visual questions.
+
 ### Detection reliability
 - Improved gap-fill detection for sentence-style prompts that do not end in a question mark.
 - Added semantic question cues such as “best way”, “feature”, “purpose”, “method”, “effect”, and “difference”.
@@ -17,6 +22,7 @@
 ### AI/provider reliability
 - Groq defaults to `qwen/qwen3.6-27b` so visual questions can work with the primary provider.
 - Existing `openai/gpt-oss-20b` and retired Llama Groq defaults are migrated automatically.
+- Added a 20-second timeout around provider requests so a stalled API cannot leave the Study Helper waiting indefinitely.
 
 ## 4.0.0 — Detection & Vision Reliability
 
