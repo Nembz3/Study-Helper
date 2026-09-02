@@ -12,19 +12,20 @@ Study Helper is a Microsoft Edge extension that detects learning activities on S
 - Questions containing images, graphs, charts, diagrams and SVG/canvas visuals
 - Screenshot fallback for visual questions when the page does not expose the image directly
 - Local diagnostic logging with refresh, export and clear controls
-- Multiple AI providers with automatic fallback and retry handling
+- Multiple AI providers with automatic fallback, timeout and retry handling
+- Lightweight recovery detection when the primary detector misses an activity
 
 ## Current version
 
-**V4.1.0**
+**V4.2.0**
 
 ## AI providers
 
-1. **Groq** — fast primary provider. Recommended default: `qwen/qwen3.6-27b` (vision-capable).
-2. **Gemini** — multimodal fallback. Recommended default: `gemini-3.6-flash`.
+1. **Groq** — fast primary provider. Recommended default: `qwen/qwen3.8-27b` (vision-capable).
+2. **Gemini** — multimodal fallback. Recommended default: `gemini-3.8-flash`.
 3. **OpenRouter** — additional fallback; choose a model that supports vision if you want it to handle visual questions.
 
-Study Helper automatically migrates retired Gemini 2.0 model IDs and older text-only Groq defaults to current supported models. Visual requests are routed to a vision-capable Groq model when Groq is selected; up to three visual inputs are sent per request.
+Study Helper automatically migrates retired/older model IDs to current defaults. Visual requests are routed to a vision-capable Groq model when Groq is selected; up to three visual inputs are sent per request. Groq reasoning is lighter for hints and stronger for explanations/answers.
 
 ## Diagnostics
 
@@ -35,6 +36,7 @@ The extension keeps up to 500 local diagnostic events. Logs can include:
 - confidence evidence
 - visual detection/capture status
 - AI provider attempts, retries and failures
+- timeouts and rate-limit classification
 - model migrations
 - UI events
 
