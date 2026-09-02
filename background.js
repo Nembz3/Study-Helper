@@ -1,4 +1,4 @@
-const VERSION="4.0.0";
+const VERSION="4.1.0";
 const PROVIDERS=[
   {id:"Groq",key:"groqKey",model:"groqModel",type:"openai",url:"https://api.groq.com/openai/v1/chat/completions"},
   {id:"Gemini",key:"geminiKey",model:"geminiModel",type:"gemini"},
@@ -6,11 +6,12 @@ const PROVIDERS=[
 ];
 const clean=s=>(s||"").replace(/\s+/g," ").trim();
 const GROQ_VISION_MODELS=new Set(["qwen/qwen3.6-27b","qwen/qwen3.8-27b"]);
+const GROQ_MODEL_MIGRATIONS={"openai/gpt-oss-20b":"qwen/qwen3.6-27b","llama-3.3-70b-versatile":"qwen/qwen3.6-27b"};
 const GEMINI_MIGRATIONS={"gemini-2.0-flash":"gemini-3.6-flash","gemini-2.0-flash-001":"gemini-3.6-flash","gemini-2.0-flash-lite":"gemini-3.1-flash-lite","gemini-2.0-flash-lite-001":"gemini-3.1-flash-lite"};
 async function safeLog(event,data={}){try{const d=await chrome.storage.local.get("studyHelperLogs"),logs=Array.isArray(d.studyHelperLogs)?d.studyHelperLogs:[];logs.push({time:new Date().toISOString(),event,data});await chrome.storage.local.set({studyHelperLogs:logs.slice(-500)});}catch{}}
 function normaliseActivity(input){
   if(typeof input==="string")return {type:"manual",question:clean(input).slice(0,1600),options:[],instruction:"",visualInputs:[]};
-  return {type:input?.type||"unknown",question:clean(input?.question).slice(0,1600),options:Array.isArray(input?.options)?input.options.slice(0,12):[],instruction:clean(input?.instruction).slice(0,500),visualInputs:Array.isArray(input?.visualInputs)?input.visualInputs.slice(0,6):[]};
+  return {type:input?.type||"unknown",question:clean(input?.question).slice(0,1600),options:Array.isArray(input?.options)?input.options.slice(0,12):[],instruction:clean(input?.instruction).slice(0,500),visualInputs:Array.isArray(input?.visualInputs)?input.visualInputs.slice(0,3):[]};
 }
 function promptFor(mode,a){
   const goals={hint:"Give a useful hint that helps the student solve it themselves. Do not give the final answer unless it is unavoidable.",explain:"Explain how to solve the question in short, clear numbered steps. Use the supplied options and visual evidence.",answer:"Give the best answer directly and explicitly. Start with 'Answer:'. For multi-select list every option. For ordering give the exact order. Give one short reason."};
@@ -43,6 +44,7 @@ async function ask(mode,input){
   const base=promptFor(mode,a),budgets=[700,1000];let lastErr="";
   for(const p of PROVIDERS){
     let key=settings[p.key],model=settings[p.model];
+    if(p.id==="Groq"&&GROQ_MODEL_MIGRATIONS[model]){const migrated=GROQ_MODEL_MIGRATIONS[model];await chrome.storage.local.set({[p.model]:migrated});await safeLog("model_migrated",{provider:p.id,from:model,to:migrated});model=migrated;}
     if(p.id==="Gemini"&&GEMINI_MIGRATIONS[model]){const migrated=GEMINI_MIGRATIONS[model];await chrome.storage.local.set({[p.model]:migrated});await safeLog("model_migrated",{provider:p.id,from:model,to:migrated});model=migrated;}
     if(!key||!model){await safeLog("provider_skipped",{provider:p.id,reason:"not_configured"});continue;}
     if(a.visualInputs.length&&p.id==="Groq"&&!GROQ_VISION_MODELS.has(model)){await safeLog("provider_skipped",{provider:p.id,model,reason:"model_has_no_vision"});continue;}
