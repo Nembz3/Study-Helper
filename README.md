@@ -16,15 +16,15 @@ Study Helper is a Microsoft Edge extension that detects learning activities on S
 
 ## Current version
 
-**V4.0.0**
+**V4.1.0**
 
 ## AI providers
 
-1. **Groq** — fast primary provider for text questions. Recommended default: `openai/gpt-oss-20b`.
+1. **Groq** — fast primary provider. Recommended default: `qwen/qwen3.6-27b` (vision-capable).
 2. **Gemini** — multimodal fallback. Recommended default: `gemini-3.6-flash`.
 3. **OpenRouter** — additional fallback; choose a model that supports vision if you want it to handle visual questions.
 
-Study Helper automatically migrates retired Gemini 2.0 model IDs to current supported models. Visual requests are not sent to the text-only Groq model.
+Study Helper automatically migrates retired Gemini 2.0 model IDs and older text-only Groq defaults to current supported models. Visual requests are routed to a vision-capable Groq model when Groq is selected; up to three visual inputs are sent per request.
 
 ## Diagnostics
 
