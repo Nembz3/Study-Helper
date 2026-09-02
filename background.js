@@ -1,4 +1,4 @@
-const VERSION="3.8.0";
+const VERSION="3.9.0";
 const PROVIDERS=[
   {id:"Groq",key:"groqKey",model:"groqModel",type:"openai",url:"https://api.groq.com/openai/v1/chat/completions"},
   {id:"Gemini",key:"geminiKey",model:"geminiModel",type:"gemini"},
@@ -11,15 +11,11 @@ function normaliseActivity(input){
   return {type:input?.type||"unknown",question:clean(input?.question).slice(0,1600),options:Array.isArray(input?.options)?input.options.slice(0,12):[],instruction:clean(input?.instruction).slice(0,500),visualInputs:Array.isArray(input?.visualInputs)?input.visualInputs.slice(0,6):[]};
 }
 function promptFor(mode,a){
-  const goals={
-    hint:"Give a useful hint that helps the student solve it themselves. Do not give the final answer unless it is unavoidable.",
-    explain:"Explain how to solve the question in short, clear numbered steps. Use the supplied options and visual evidence.",
-    answer:"Give the best answer directly and explicitly. Start with 'Answer:'. For multi-select list every option. For ordering give the exact order. Give one short reason."
-  };
+  const goals={hint:"Give a useful hint that helps the student solve it themselves. Do not give the final answer unless it is unavoidable.",explain:"Explain how to solve the question in short, clear numbered steps. Use the supplied options and visual evidence.",answer:"Give the best answer directly and explicitly. Start with 'Answer:'. For multi-select list every option. For ordering give the exact order. Give one short reason."};
   const lines=[`Task: ${goals[mode]||goals.explain}`,`Activity type: ${a.type}`,`Question: ${a.question}`];
   if(a.options.length)lines.push(`Options: ${a.options.join(" | ")}`);
   if(a.instruction)lines.push(`Instruction: ${a.instruction}`);
-  if(a.visualInputs.length)lines.push(`Visual evidence is attached. Carefully inspect the Seneca question card image/graph/diagram. Ignore browser chrome and the Copilot/sidebar.`);
+  if(a.visualInputs.length)lines.push("Visual evidence is attached. Carefully inspect the Seneca question card image/graph/diagram. Ignore browser chrome and the Copilot/sidebar.");
   lines.push("Return plain text. Never return an empty response.");
   return lines.join("\n");
 }
@@ -42,7 +38,7 @@ async function loadSettings(){return await chrome.storage.local.get(PROVIDERS.fl
 async function ask(mode,input){
   const a=normaliseActivity(input);if(!a.question)throw new Error("No question detected");
   const settings=await loadSettings();await safeLog("request_started",{mode,type:a.type,question:a.question,optionCount:a.options.length,visualCount:a.visualInputs.length});
-  const base=promptFor(mode,a), budgets=[700,1000];let lastErr="";
+  const base=promptFor(mode,a),budgets=[700,1000];let lastErr="";
   for(const p of PROVIDERS){
     const key=settings[p.key],model=settings[p.model];if(!key||!model){await safeLog("provider_skipped",{provider:p.id,reason:"not_configured"});continue;}
     for(let attempt=0;attempt<2;attempt++){
