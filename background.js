@@ -1,13 +1,13 @@
-const VERSION="4.1.0";
+const VERSION="4.2.0";
 const PROVIDERS=[
   {id:"Groq",key:"groqKey",model:"groqModel",type:"openai",url:"https://api.groq.com/openai/v1/chat/completions"},
   {id:"Gemini",key:"geminiKey",model:"geminiModel",type:"gemini"},
   {id:"OpenRouter",key:"openrouterKey",model:"openrouterModel",type:"openai",url:"https://openrouter.ai/api/v1/chat/completions"}
 ];
 const clean=s=>(s||"").replace(/\s+/g," ").trim();
-const GROQ_VISION_MODELS=new Set(["qwen/qwen3.6-27b","qwen/qwen3.8-27b"]);
-const GROQ_MODEL_MIGRATIONS={"openai/gpt-oss-20b":"qwen/qwen3.6-27b","llama-3.3-70b-versatile":"qwen/qwen3.6-27b"};
-const GEMINI_MIGRATIONS={"gemini-2.0-flash":"gemini-3.6-flash","gemini-2.0-flash-001":"gemini-3.6-flash","gemini-2.0-flash-lite":"gemini-3.1-flash-lite","gemini-2.0-flash-lite-001":"gemini-3.1-flash-lite"};
+const GROQ_VISION_MODELS=new Set(["qwen/qwen3.8-27b","qwen/qwen3.6-27b"]);
+const GROQ_MODEL_MIGRATIONS={"openai/gpt-oss-20b":"qwen/qwen3.8-27b","llama-3.3-70b-versatile":"qwen/qwen3.8-27b"};
+const GEMINI_MIGRATIONS={"gemini-2.0-flash":"gemini-3.8-flash","gemini-2.0-flash-001":"gemini-3.8-flash","gemini-3.6-flash":"gemini-3.8-flash","gemini-2.0-flash-lite":"gemini-3.5-flash-lite","gemini-2.0-flash-lite-001":"gemini-3.5-flash-lite"};
 async function safeLog(event,data={}){try{const d=await chrome.storage.local.get("studyHelperLogs"),logs=Array.isArray(d.studyHelperLogs)?d.studyHelperLogs:[];logs.push({time:new Date().toISOString(),event,data});await chrome.storage.local.set({studyHelperLogs:logs.slice(-500)});}catch{}}
 function normaliseActivity(input){
   if(typeof input==="string")return {type:"manual",question:clean(input).slice(0,1600),options:[],instruction:"",visualInputs:[]};
@@ -22,13 +22,15 @@ function promptFor(mode,a){
   lines.push("Return plain text. Never return an empty response.");
   return lines.join("\n");
 }
+function reasoningFor(mode,model){if(!String(model).startsWith("qwen/"))return undefined;return mode==="hint"?"low":"medium";}
 function openAIContent(prompt,visuals){if(!visuals.length)return prompt;return [{type:"text",text:prompt},...visuals.map(v=>v.type==="data"?{type:"image_url",image_url:{url:v.data}}:{type:"image_url",image_url:{url:v.url}})];}
 async function fetchWithTimeout(url,options,ms=20000){
   const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),ms);
   try{return await fetch(url,{...options,signal:controller.signal});}catch(e){if(e?.name==="AbortError")throw new Error("Request timed out after 20 seconds");throw e;}finally{clearTimeout(timer);}
 }
-async function callOpenAI(p,key,model,prompt,maxTokens,visuals){
+async function callOpenAI(p,key,model,prompt,maxTokens,visuals,mode){
   const body={model,messages:[{role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. If an image is attached, inspect it carefully. Focus on the Seneca question card and ignore browser chrome, sidebars and extension UI."},{role:"user",content:openAIContent(prompt,visuals)}],temperature:0.15,max_tokens:maxTokens};
+  const reasoning=reasoningFor(mode,model);if(reasoning)body.reasoning_effort=reasoning;
   const r=await fetchWithTimeout(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify(body)});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`${p.id}: ${j?.error?.message||r.statusText||r.status}`);
   const text=j?.choices?.[0]?.message?.content||"";if(!clean(text))throw new Error(`${p.id}: Empty response`);return clean(text);
@@ -55,11 +57,11 @@ async function ask(mode,input){
     for(let attempt=0;attempt<2;attempt++){
       try{
         const prompt=attempt?base+"\nBe concise but complete; do not omit the answer or explanation.":base;
-        const text=p.type==="gemini"?await callGemini(key,model,prompt,budgets[attempt],a.visualInputs):await callOpenAI(p,key,model,prompt,budgets[attempt],a.visualInputs);
+        const text=p.type==="gemini"?await callGemini(key,model,prompt,budgets[attempt],a.visualInputs):await callOpenAI(p,key,model,prompt,budgets[attempt],a.visualInputs,mode);
         await safeLog("provider_success",{provider:p.id,mode,chars:text.length,visualCount:a.visualInputs.length});
         await chrome.storage.local.set({lastResult:{time:new Date().toISOString(),mode,type:a.type,question:a.question,text,provider:p.id}});
         return {ok:true,text,provider:p.id};
-      }catch(e){lastErr=String(e?.message||e);await safeLog("provider_failure",{provider:p.id,attempt:attempt+1,error:lastErr});}
+      }catch(e){lastErr=String(e?.message||e);const lower=lastErr.toLowerCase();const kind=/429|rate.?limit|quota/.test(lower)?"rate_limit":/timeout/.test(lower)?"timeout":"error";await safeLog("provider_failure",{provider:p.id,attempt:attempt+1,error:lastErr,kind});if(kind==="rate_limit")break;}
     }
   }
   throw new Error(lastErr||"No AI provider is configured");
