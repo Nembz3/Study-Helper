@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableExtensions
 title Study Helper Updater
+
 cd /d "%~dp0"
 
 echo.
@@ -12,17 +13,37 @@ echo.
 where git >nul 2>&1
 if errorlevel 1 (
   echo ERROR: Git is not installed or is not in PATH.
-  echo Install Git for Windows, then restart this updater.
+  echo Install Git for Windows, then run this updater again.
   pause
   exit /b 1
 )
 
-if exist ".git" goto :update
+if exist ".git" (
+  echo Git repository detected.
+  echo Checking for updates...
+  git pull origin main
+  if errorlevel 1 (
+    echo.
+    echo Update failed. Check your internet connection and GitHub access.
+    pause
+    exit /b 1
+  )
+  echo.
+  echo =====================================
+  echo Update complete!
+  echo You can now reload Study Helper in edge://extensions
+  echo =====================================
+  pause
+  exit /b 0
+)
 
 echo This folder was installed from a ZIP file.
-echo Automatic updates need a one-time Git setup.
+echo.
+echo The updater needs to convert it into a Git clone once.
+echo Your existing files will be replaced with the latest version.
 echo.
 set /p choice=Set up automatic updates now? (Y/N): 
+
 if /I not "%choice%"=="Y" (
   echo Setup cancelled.
   pause
@@ -30,42 +51,27 @@ if /I not "%choice%"=="Y" (
 )
 
 echo.
-echo Connecting this folder to GitHub...
+echo Setting up Git repository...
 git init
 if errorlevel 1 goto :error
-git remote remove origin >nul 2>&1
-git remote add origin https://github.com/Nembz3/Study-Helper.git
+
+git remote add origin https://github.com/Nembz3/Study-Helper.git 2>nul
 git fetch origin main
 if errorlevel 1 goto :error
 
-git checkout -B main origin/main
+git reset --hard origin/main
 if errorlevel 1 goto :error
 
+git branch -M main
+git branch --set-upstream-to=origin/main main >nul 2>&1
+
 echo.
+echo =====================================
 echo Automatic updates are now configured!
-echo Future updates only require double-clicking update.bat.
-pause
-exit /b 0
-
-:update
-echo Git repository detected.
-echo Checking for updates...
-git pull --ff-only origin main
-if errorlevel 1 (
-  echo.
-  echo Update failed.
-  echo If you changed project files locally, move your changes elsewhere
-  echo or use a fresh copy of the repository.
-  pause
-  exit /b 1
-)
-
+echo =====================================
 echo.
-echo =====================================
-echo Update complete!
-echo Reload Study Helper in edge://extensions
-echo then refresh the Seneca tab.
-echo =====================================
+echo From now on, double-click update.bat to get updates.
+echo.
 pause
 exit /b 0
 
@@ -73,8 +79,7 @@ exit /b 0
 echo.
 echo =====================================
 echo Setup failed.
-echo Make sure Git is installed, your internet works,
-echo and this GitHub account has access to the private repository.
+echo Make sure you have access to the GitHub repository.
 echo =====================================
 pause
 exit /b 1

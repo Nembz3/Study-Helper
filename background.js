@@ -1,20 +1,73 @@
-const providers=[
+const VERSION="3.8.0";
+const PROVIDERS=[
   {id:"Groq",key:"groqKey",model:"groqModel",type:"openai",url:"https://api.groq.com/openai/v1/chat/completions"},
   {id:"Gemini",key:"geminiKey",model:"geminiModel",type:"gemini"},
   {id:"OpenRouter",key:"openrouterKey",model:"openrouterModel",type:"openai",url:"https://openrouter.ai/api/v1/chat/completions"}
 ];
-const fields=["groqKey","groqModel","geminiKey","geminiModel","openrouterKey","openrouterModel"];
-const LOG_KEY="studyHelperLogs";
-const MAX_LOGS=500;
 const clean=s=>(s||"").replace(/\s+/g," ").trim();
-function safeLog(event,data={}){const entry={ts:new Date().toISOString(),event,data};chrome.storage.local.get(LOG_KEY).then(d=>{const logs=Array.isArray(d[LOG_KEY])?d[LOG_KEY]:[];logs.push(entry);chrome.storage.local.set({[LOG_KEY]:logs.slice(-MAX_LOGS)});}).catch(()=>{});}
-chrome.runtime.onInstalled.addListener(()=>{chrome.contextMenus.removeAll(()=>chrome.contextMenus.create({id:"study-helper-selection",title:"Ask Study Helper about this",contexts:["selection"]}));safeLog("extension_installed");});
-chrome.contextMenus.onClicked.addListener(info=>{if(info.menuItemId==="study-helper-selection"&&info.selectionText){chrome.storage.local.set({selectedQuestion:info.selectionText});safeLog("context_selection",{chars:info.selectionText.length});}});
-function normaliseActivity(input){if(typeof input==="string")return {type:"manual",question:clean(input).slice(0,1400),options:[],instruction:"",visualInputs:[]};return {type:clean(input?.type||"unknown").slice(0,40),question:clean(input?.question).slice(0,1200),options:(input?.options||[]).map(x=>clean(x).slice(0,240)).filter(Boolean).slice(0,12),instruction:clean(input?.instruction).slice(0,300),visualInputs:Array.isArray(input?.visualInputs)?input.visualInputs.slice(0,4):[]};}
-function promptFor(mode,input){const a=normaliseActivity(input);const rules={hint:"Give exactly one concrete hint that helps solve the question. Do not leave the response blank. Do not give the final answer unless the question cannot reasonably be solved without it.",explain:"Explain how to solve the question in short numbered steps. Use the supplied options and carefully inspect any graph, diagram, chart or image. Do not leave the response blank.",answer:"Give the best answer directly and explicitly. Start with 'Answer:'. For multi-select, list every option to select. For ordering, give the exact order. For graph/image questions, read the visual carefully before answering. Then give one short reason. Do not leave the response blank."};const lines=[rules[mode]||rules.answer,"Activity type: "+a.type,"Question: "+a.question];if(a.instruction)lines.push("Instruction: "+a.instruction);if(a.options.length)lines.push("Options:\n"+a.options.map((x,i)=>(i+1)+". "+x).join("\n"));if(a.visualInputs.length)lines.push("A visual is attached. Use it as evidence; do not guess from the text alone.");lines.push("Return useful plain text even if some activity details are imperfect.");return lines.join("\n");}
-function openAIUserContent(prompt,visuals){if(!visuals.length)return prompt;return [{type:"text",text:prompt},...visuals.map(v=>v.type==="data"?{type:"image_url",image_url:{url:v.data}}:{type:"image_url",image_url:{url:v.url}})];}
-async function callOpenAI(p,key,model,prompt,maxTokens,visuals){const r=await fetch(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify({model,messages:[{role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. Never return a blank response. When an image is attached, inspect it carefully and use graph axes, labels, values, lines, shapes and diagrams as evidence."},{role:"user",content:openAIUserContent(prompt,visuals)}],temperature:.1,max_tokens:maxTokens})});const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");const choice=d.choices?.[0]||{};const text=choice.message?.content??choice.text??"";const cleaned=clean(Array.isArray(text)?text.map(x=>typeof x==="string"?x:(x?.text||"")).join(""):text);if(cleaned)return cleaned;throw new Error("Provider returned no text (finish reason: "+(choice.finish_reason||"unknown")+")");}
-async function callGemini(key,model,prompt,maxTokens,visuals){const parts=[{text:"You are an accurate, concise UK secondary-school study tutor. Always return plain text and never leave the response blank. When images are attached, inspect graphs, diagrams, charts, labels and values carefully.\n\n"+prompt}];for(const v of visuals){if(v.type==="data"){const match=String(v.data).match(/^data:([^;,]+);base64,(.+)$/s);if(match)parts.push({inlineData:{mimeType:match[1],data:match[2]}});}}const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:.2,maxOutputTokens:maxTokens}})});const d=await r.json();if(!r.ok)throw new Error(d.error?.message||"Request failed");const candidate=d.candidates?.[0];const text=candidate?.content?.parts?.map(x=>x.text||"").join("")||"";const cleaned=clean(text);if(cleaned)return cleaned;throw new Error("Provider returned no text (finish reason: "+(candidate?.finishReason||"unknown")+")");}
-async function saveResult(activity,text,provider){const historyText=[activity.question,...activity.options].join(" | ").slice(0,1200);const old=(await chrome.storage.local.get("history")).history||[];const next=[historyText,...old.filter(x=>x!==historyText)].slice(0,20);await chrome.storage.local.set({history:next});return {ok:true,text:clean(text),provider};}
-async function ask(mode,input){const settings=await chrome.storage.local.get(fields),activity=normaliseActivity(input),prompt=promptFor(mode,activity),errors=[];if(!activity.question)return {ok:false,error:"No question text was detected."};const maxTokens=mode==="hint"?220:mode==="answer"?320:280;safeLog("request_started",{mode,type:activity.type,question:activity.question,optionCount:activity.options.length,visualCount:activity.visualInputs.length});for(const p of providers){const key=settings[p.key],model=settings[p.model];if(!key||!model){safeLog("provider_skipped",{provider:p.id,reason:"not_configured"});continue;}try{const call=(text,budget)=>p.type==="gemini"?callGemini(key,model,text,budget,activity.visualInputs):callOpenAI(p,key,model,text,budget,activity.visualInputs);try{const text=await call(prompt,maxTokens);if(clean(text)){safeLog("provider_success",{provider:p.id,mode,chars:text.length,visualCount:activity.visualInputs.length});return saveResult(activity,text,p.id);}}catch(firstError){safeLog("provider_first_failure",{provider:p.id,error:firstError.message,mode});const fallbackPrompt="Give a concise useful response in plain text. Do not return blank.\n"+prompt;try{const text=await call(fallbackPrompt,Math.max(maxTokens,360));if(clean(text)){safeLog("provider_retry_success",{provider:p.id,mode,chars:text.length});return saveResult(activity,text,p.id);}}catch(secondError){errors.push(p.id+": "+secondError.message);safeLog("provider_retry_failure",{provider:p.id,error:secondError.message,mode});continue;}errors.push(p.id+": Empty response");}}catch(e){errors.push(p.id+": "+e.message);safeLog("provider_failure",{provider:p.id,error:e.message,mode});}}const error=errors.length?errors.join(" | "):"No AI provider is configured.";safeLog("request_failed",{mode,error});return {ok:false,error};}
-chrome.runtime.onMessage.addListener((message,sender,sendResponse)=>{if(message.type==="study-helper-log"){safeLog(message.event||"content_event",message.data||{});return false;}if(message.type==="study-helper-get-logs"){chrome.storage.local.get(LOG_KEY).then(d=>sendResponse({ok:true,logs:d[LOG_KEY]||[]}));return true;}if(message.type==="study-helper-clear-logs"){chrome.storage.local.set({[LOG_KEY]:[]}).then(()=>sendResponse({ok:true}));return true;}if(message.type==="study-helper-analyse"){ask(message.mode||"answer",message.activity??message.question).then(sendResponse);return true;}});
+async function safeLog(event,data={}){try{const d=await chrome.storage.local.get("studyHelperLogs"),logs=Array.isArray(d.studyHelperLogs)?d.studyHelperLogs:[];logs.push({time:new Date().toISOString(),event,data});await chrome.storage.local.set({studyHelperLogs:logs.slice(-500)});}catch{}}
+function normaliseActivity(input){
+  if(typeof input==="string")return {type:"manual",question:clean(input).slice(0,1600),options:[],instruction:"",visualInputs:[]};
+  return {type:input?.type||"unknown",question:clean(input?.question).slice(0,1600),options:Array.isArray(input?.options)?input.options.slice(0,12):[],instruction:clean(input?.instruction).slice(0,500),visualInputs:Array.isArray(input?.visualInputs)?input.visualInputs.slice(0,6):[]};
+}
+function promptFor(mode,a){
+  const goals={
+    hint:"Give a useful hint that helps the student solve it themselves. Do not give the final answer unless it is unavoidable.",
+    explain:"Explain how to solve the question in short, clear numbered steps. Use the supplied options and visual evidence.",
+    answer:"Give the best answer directly and explicitly. Start with 'Answer:'. For multi-select list every option. For ordering give the exact order. Give one short reason."
+  };
+  const lines=[`Task: ${goals[mode]||goals.explain}`,`Activity type: ${a.type}`,`Question: ${a.question}`];
+  if(a.options.length)lines.push(`Options: ${a.options.join(" | ")}`);
+  if(a.instruction)lines.push(`Instruction: ${a.instruction}`);
+  if(a.visualInputs.length)lines.push(`Visual evidence is attached. Carefully inspect the Seneca question card image/graph/diagram. Ignore browser chrome and the Copilot/sidebar.`);
+  lines.push("Return plain text. Never return an empty response.");
+  return lines.join("\n");
+}
+function openAIContent(prompt,visuals){if(!visuals.length)return prompt;return [{type:"text",text:prompt},...visuals.map(v=>v.type==="data"?{type:"image_url",image_url:{url:v.data}}:{type:"image_url",image_url:{url:v.url}})];}
+async function callOpenAI(p,key,model,prompt,maxTokens,visuals){
+  const body={model,messages:[{role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. If an image is attached, inspect it carefully. Focus on the Seneca question card and ignore browser chrome, sidebars and extension UI."},{role:"user",content:openAIContent(prompt,visuals)}],temperature:0.15,max_tokens:maxTokens};
+  const r=await fetch(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`${p.id}: ${j?.error?.message||r.statusText||r.status}`);
+  const text=j?.choices?.[0]?.message?.content||"";if(!clean(text))throw new Error(`${p.id}: Empty response`);return clean(text);
+}
+async function callGemini(key,model,prompt,maxTokens,visuals){
+  const parts=[{text:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. Focus on the Seneca question card and ignore browser chrome, sidebars and extension UI.\n\n"+prompt}];
+  for(const v of visuals){if(v.type==="data"){const m=String(v.data).match(/^data:([^;]+);base64,(.+)$/s);if(m)parts.push({inlineData:{mimeType:m[1],data:m[2]}});}}
+  const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{temperature:0.15,maxOutputTokens:maxTokens}})});
+  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`Gemini: ${j?.error?.message||r.statusText||r.status}`);
+  const text=(j?.candidates||[]).flatMap(c=>c?.content?.parts||[]).map(x=>x?.text||"").join(" ");if(!clean(text))throw new Error("Gemini: Empty response");return clean(text);
+}
+async function loadSettings(){return await chrome.storage.local.get(PROVIDERS.flatMap(p=>[p.key,p.model]));}
+async function ask(mode,input){
+  const a=normaliseActivity(input);if(!a.question)throw new Error("No question detected");
+  const settings=await loadSettings();await safeLog("request_started",{mode,type:a.type,question:a.question,optionCount:a.options.length,visualCount:a.visualInputs.length});
+  const base=promptFor(mode,a), budgets=[700,1000];let lastErr="";
+  for(const p of PROVIDERS){
+    const key=settings[p.key],model=settings[p.model];if(!key||!model){await safeLog("provider_skipped",{provider:p.id,reason:"not_configured"});continue;}
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const prompt=attempt?base+"\nBe concise but complete; do not omit the answer or explanation.":base;
+        const text=p.type==="gemini"?await callGemini(key,model,prompt,budgets[attempt],a.visualInputs):await callOpenAI(p,key,model,prompt,budgets[attempt],a.visualInputs);
+        await safeLog("provider_success",{provider:p.id,mode,chars:text.length,visualCount:a.visualInputs.length});
+        await chrome.storage.local.set({lastResult:{time:new Date().toISOString(),mode,type:a.type,question:a.question,text,provider:p.id}});
+        return {ok:true,text,provider:p.id};
+      }catch(e){lastErr=String(e?.message||e);await safeLog("provider_failure",{provider:p.id,attempt:attempt+1,error:lastErr});}
+    }
+  }
+  throw new Error(lastErr||"No AI provider is configured");
+}
+chrome.runtime.onMessage.addListener((msg,sender,sendResponse)=>{
+  if(msg?.type==="study-helper-log"){safeLog(msg.event,msg.data).catch(()=>{});return;}
+  if(msg?.type==="study-helper-get-logs"){chrome.storage.local.get("studyHelperLogs").then(d=>sendResponse({ok:true,logs:d.studyHelperLogs||[]}));return true;}
+  if(msg?.type==="study-helper-clear-logs"){chrome.storage.local.set({studyHelperLogs:[]}).then(()=>sendResponse({ok:true}));return true;}
+  if(msg?.type==="study-helper-capture-tab"){
+    const windowId=sender?.tab?.windowId;
+    chrome.tabs.captureVisibleTab(windowId,{format:"png"}).then(dataUrl=>sendResponse({ok:true,dataUrl})).catch(e=>{safeLog("capture_failed",{error:String(e?.message||e)});sendResponse({ok:false,error:String(e?.message||e)});});
+    return true;
+  }
+  if(msg?.type==="study-helper-analyse"){
+    ask(msg.mode,msg.activity).then(r=>sendResponse(r)).catch(e=>{safeLog("request_failed",{error:String(e?.message||e)});sendResponse({ok:false,error:String(e?.message||e)});});
+    return true;
+  }
+});

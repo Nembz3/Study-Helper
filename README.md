@@ -2,14 +2,18 @@
 
 A Microsoft Edge extension that detects questions on Seneca Learning and provides optional AI-powered hints, explanations and answers.
 
-## Current version: 3.7.0
+## Current version: 3.8.0
 
-### What's new in 3.7
-- More reliable detection of Seneca questions, including single text-input questions.
+### What's new in 3.8
+- Reworked detection around Seneca activity cards and grouped controls.
+- More reliable multiple-choice detection, including radio/button-style choices.
+- Proper detection of single and multiple gap-fill/text-input questions.
 - Better handling of questions split across multiple page elements.
 - Improved protection against detecting Seneca navigation and toolbar text.
-- Support for graph, chart, diagram and image-based questions.
+- Better support for graph, chart, diagram and image-based questions.
+- Added a visible-tab screenshot fallback for visual questions when direct image fetching fails.
 - Visuals are captured when possible and supplied to compatible AI providers for analysis.
+- Added protection against stale content scripts after an extension reload.
 - Stronger empty-response handling with provider retry/fallback.
 - Built-in diagnostic logging for troubleshooting detection and AI failures.
 

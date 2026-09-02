@@ -1,21 +1,38 @@
 {
   "manifest_version": 3,
   "name": "Study Helper",
-  "version": "3.7.0",
-  "description": "Personal AI study helper with reliable Seneca question detection, visual question support and diagnostic logging.",
-  "permissions": ["storage", "contextMenus"],
+  "version": "3.8.0",
+  "description": "Personal AI study helper with robust Seneca question detection, visual question support and diagnostic logging.",
+  "permissions": [
+    "storage",
+    "contextMenus",
+    "tabs"
+  ],
   "host_permissions": [
     "https://app.senecalearning.com/*",
     "https://api.groq.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://openrouter.ai/*"
   ],
-  "content_scripts": [{
-    "matches": ["https://app.senecalearning.com/*"],
-    "js": ["content.js"],
-    "css": ["content.css"],
-    "run_at": "document_idle"
-  }],
-  "background": {"service_worker": "background.js"},
-  "action": {"default_popup": "popup.html", "default_title": "Study Helper"}
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app.senecalearning.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Study Helper"
+  }
 }
