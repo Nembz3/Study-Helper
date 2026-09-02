@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Study Helper",
-  "version": "3.8.0",
-  "description": "Personal AI study helper with robust Seneca question detection, visual question support and diagnostic logging.",
+  "version": "3.9.0",
+  "description": "Personal AI study helper with robust Seneca activity detection, gap-fill support, visual question support and diagnostic logging.",
   "permissions": [
     "storage",
     "contextMenus",
