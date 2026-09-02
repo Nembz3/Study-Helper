@@ -4,7 +4,7 @@ async function init(){
   const d=await chrome.storage.local.get(["selectedQuestion","history","rapidAutoAnalyse",...fields]);
   if(d.selectedQuestion)$("question").value=d.selectedQuestion;
   $("rapidAutoAnalyse").checked=!!d.rapidAutoAnalyse;
-  const migrations={groqModel:{"llama-3.3-70b-versatile":"openai/gpt-oss-20b"},geminiModel:{"gemini-2.0-flash":"gemini-3.6-flash","gemini-2.0-flash-001":"gemini-3.6-flash","gemini-2.0-flash-lite":"gemini-3.1-flash-lite","gemini-2.0-flash-lite-001":"gemini-3.1-flash-lite"}};
+  const migrations={groqModel:{"llama-3.3-70b-versatile":"qwen/qwen3.6-27b","openai/gpt-oss-20b":"qwen/qwen3.6-27b"},geminiModel:{"gemini-2.0-flash":"gemini-3.6-flash","gemini-2.0-flash-001":"gemini-3.6-flash","gemini-2.0-flash-lite":"gemini-3.1-flash-lite","gemini-2.0-flash-lite-001":"gemini-3.1-flash-lite"}};
   for(const f of fields){let value=d[f];if(migrations[f]?.[value]){value=migrations[f][value];await chrome.storage.local.set({[f]:value});}if(value)$(f).value=value;}
   renderHistory(d.history||[]);
   updateLogCount();
