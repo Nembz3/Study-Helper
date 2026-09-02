@@ -21,7 +21,8 @@
         "https://app.senecalearning.com/*"
       ],
       "js": [
-        "content.js"
+        "content.js",
+        "content-recovery.js"
       ],
       "css": [
         "content.css"
