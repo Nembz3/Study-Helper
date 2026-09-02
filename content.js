@@ -1,309 +1,47 @@
 (()=>{
   const ROOT_ID="study-helper-v3-root";
-  const VERSION="3.9.0";
-  const IGNORE=[
-    /tasks completed/i,/\bup next\b/i,/\bsection complete\b/i,/your memory has been stored/i,
-    /memory strength/i,/time spent/i,/current level/i,/\btotal xp\b/i,/choose where to store your memory/i,
-    /summer revision/i,/^assignment$/i,/^quiz$/i,/^wrong answers$/i,/how do you want to learn/i
-  ];
+  const VERSION="4.0.0";
+  const IGNORE=[/tasks completed/i,/\bup next\b/i,/\bsection complete\b/i,/your memory has been stored/i,/memory strength/i,/time spent/i,/current level/i,/\btotal xp\b/i,/choose where to store your memory/i,/summer revision/i,/^assignment$/i,/^quiz$/i,/^wrong answers$/i,/how do you want to learn/i];
   const UI_PHRASES=/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar|flag|close|scroll down to continue|switch the toggles|choose an answer|reveal answer|next|back|continue|skip|exit|home|more options|settings|help|share|copy|listen|read aloud)$/i;
   const ACTION_RX=/\b(reveal answer|choose an answer|select an answer|type your answer|check answer|submit|switch the toggles|drag into the correct order|select all that apply|fill in|fill the gaps?|choose one)\b/i;
   const QUESTION_RX=/\b(what|which|where|when|why|how|who|name|complete|match|choose|select|fill|type|drag|connect|identify|state|calculate|write|put|sort|order|arrange|true|false|for what|to what|at what|in what|by what|percentage|percent|value|speed|distance|time|graph|diagram|image|figure|equation|formula|mass|volume|temperature|force|energy|velocity|resultant|according|describe|explain|give|state|work out|find)\b/i;
   const VISUAL_RX=/\b(graph|diagram|image|figure|chart|plot|shown below|shown above|picture|photo|illustration|table|map)\b/i;
   const DRAG_RX=/\b(drag|drop|correct order|arrange|reorder|sort|move)\b/i;
-  const INPUT_SELECTOR='input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]),textarea,[contenteditable="true"],[role="textbox"]';
+  const INPUT_SELECTOR='input[type="text"],input[type="number"],input[type="tel"],input[type="url"],input[type="email"],textarea,[contenteditable="true"],[role="textbox"]';
+  const OPTION_SELECTOR='button,[role="button"],[role="option"],[role="radio"],[role="checkbox"],[role="switch"],input[type="radio"],input[type="checkbox"],select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable],[data-option],[data-answer],[data-choice]';
   let lastSignature="",dismissedSignature="",analysing=false,debounce,lastScanAt=0,pending="",pendingSince=0,dead=false;
-  const cache=new Map(),rapidAnalysed=new Set();
-  let observer=null,scanTimer=null;
+  const cache=new Map(),rapidAnalysed=new Set();let observer=null,scanTimer=null;
   const clean=s=>(s||"").replace(/\u00a0/g," ").replace(/[ \t\r\f]+/g," ").replace(/\n{2,}/g,"\n").trim();
   const flat=s=>clean(s).replace(/\s+/g," ").trim();
   function contextAlive(){try{return !!chrome?.runtime?.id;}catch{return false;}}
   function killContext(){if(dead)return;dead=true;try{observer?.disconnect();}catch{}try{clearInterval(scanTimer);}catch{}clearTimeout(debounce);}
-  async function sendMessage(message){
-    if(!contextAlive()){killContext();return {ok:false,error:"Extension was reloaded. Refresh this Seneca tab."};}
-    try{return await chrome.runtime.sendMessage(message);}catch(e){
-      const msg=String(e?.message||e);
-      if(/extension context invalidated|receiving end does not exist/i.test(msg)){killContext();return {ok:false,error:"Extension was reloaded. Refresh this Seneca tab."};}
-      throw e;
-    }
-  }
+  async function sendMessage(message){if(!contextAlive()){killContext();return {ok:false,error:"Extension was reloaded. Refresh this Seneca tab."};}try{return await chrome.runtime.sendMessage(message);}catch(e){const msg=String(e?.message||e);if(/extension context invalidated|receiving end does not exist/i.test(msg)){killContext();return {ok:false,error:"Extension was reloaded. Refresh this Seneca tab."};}throw e;}}
   const log=(event,data={})=>{if(dead)return;sendMessage({type:"study-helper-log",event,data}).catch(()=>{});};
-  function visible(el){
-    if(!el||el.closest?.("#"+ROOT_ID))return false;
-    const r=el.getBoundingClientRect(),s=getComputedStyle(el);
-    return r.width>8&&r.height>6&&s.display!=="none"&&s.visibility!=="hidden"&&s.opacity!=="0"&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;
-  }
+  function visible(el){if(!el||el.closest?.("#"+ROOT_ID))return false;const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>8&&r.height>6&&s.display!=="none"&&s.visibility!=="hidden"&&s.opacity!=="0"&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;}
   const textOf=el=>flat(el?.innerText||el?.textContent||"");
-  const labelOf=el=>flat(el?.innerText||el?.value||el?.getAttribute?.("aria-label")||el?.getAttribute?.("placeholder")||el?.getAttribute?.("name")||el?.getAttribute?.("title")||el?.getAttribute?.("data-testid")||"");
-  const ignored=t=>!t||IGNORE.some(rx=>rx.test(t));
-  const isTextInput=el=>!!el?.matches?.(INPUT_SELECTOR);
-  const isAnswerLikeInput=el=>{
-    if(!isTextInput(el)||!visible(el))return false;
-    const s=labelOf(el).toLowerCase();
-    if(/search|find|message|chat|copilot|email|password|login|comment|feedback|url/i.test(s))return false;
-    if(el.closest?.("#"+ROOT_ID))return false;
-    return true;
-  };
-  function allControls(){
-    const selector='button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],'+INPUT_SELECTOR+',select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]';
-    return [...document.querySelectorAll(selector)].filter(el=>{
-      if(!visible(el))return false;
-      if(isTextInput(el))return isAnswerLikeInput(el);
-      const t=labelOf(el);
-      if(!t||t.length>260||UI_PHRASES.test(t))return false;
-      if(/^(settings|menu|more options|open|help|feedback|share|copy|listen|read aloud)$/i.test(t))return false;
-      return true;
-    });
-  }
-  function unique(items){
-    const out=[],seen=new Set();
-    for(const item of items){
-      const t=flat(item).replace(/^(?:[A-Z]|\d+)[.)]\s*/,"");
-      const k=t.toLowerCase();
-      if(t.length>1&&t.length<300&&!seen.has(k)&&!UI_PHRASES.test(t)){seen.add(k);out.push(t);}
-    }
-    return out.slice(0,12);
-  }
-  function rect(el){return el.getBoundingClientRect();}
-  function center(r){return {x:r.left+r.width/2,y:r.top+r.height/2};}
-  function overlapX(a,b){return Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left));}
-  function likelyOption(el){
-    if(!el||isTextInput(el))return false;
-    const t=labelOf(el);
-    if(!t||t.length>180||UI_PHRASES.test(t))return false;
-    const r=rect(el);
-    if(r.width<70||r.height<20)return false;
-    const role=(el.getAttribute("role")||"").toLowerCase();
-    const cls=String(el.className||"").toLowerCase();
-    return role==="radio"||role==="checkbox"||/option|answer|choice|response|selectable|quiz/i.test(cls)||el.tagName==="BUTTON"||el.hasAttribute("aria-pressed")||el.hasAttribute("aria-checked");
-  }
-  function controlGroups(list){
-    const candidates=list.filter(el=>isTextInput(el)||likelyOption(el));
-    const unused=new Set(candidates),groups=[];
-    while(unused.size){
-      const seed=unused.values().next().value;unused.delete(seed);
-      const group=[seed];let changed=true;
-      while(changed){
-        changed=false;
-        for(const el of [...unused]){
-          const r=rect(el);
-          const close=group.some(g=>{
-            const q=rect(g);
-            const vGap=Math.min(Math.abs(r.top-q.bottom),Math.abs(q.top-r.bottom));
-            const hGap=Math.min(Math.abs(r.left-q.right),Math.abs(q.left-r.right));
-            const sameRow=Math.abs(center(r).y-center(q).y)<=Math.max(r.height,q.height)*1.35;
-            const sameCol=Math.abs(center(r).x-center(q).x)<=Math.max(r.width,q.width)*0.28;
-            const similar=Math.max(r.width,q.width)/Math.max(1,Math.min(r.width,q.width))<2.2;
-            return similar&&((sameRow&&hGap<90)||(sameCol&&vGap<130));
-          });
-          if(close){group.push(el);unused.delete(el);changed=true;}
-        }
-      }
-      if(group.length>=1)groups.push(group);
-    }
-    return groups.sort((a,b)=>b.length-a.length);
-  }
-  function candidateAncestors(seed,group){
-    const out=[],seen=new Set();let el=seed;
-    for(let depth=0;el&&depth<18;depth++,el=el.parentElement){
-      if(seen.has(el))continue;seen.add(el);
-      if(el===document.body||el===document.documentElement)break;
-      const r=rect(el);if(r.width<220||r.height<55)continue;
-      if(r.width>innerWidth*0.97&&r.height>innerHeight*0.9)continue;
-      if(r.height>innerHeight*1.35)continue;
-      if(!group.every(c=>el.contains(c)))continue;
-      const local=[...el.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],'+INPUT_SELECTOR+',select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')].filter(visible);
-      if(local.length>Math.max(14,group.length+7))continue;
-      const text=flat(el.innerText||el.textContent||"");
-      if(text.length>5000)continue;
-      out.push(el);
-    }
-    return out;
-  }
-  function textLines(card){
-    return clean(card.innerText||card.textContent||"").split(/\n+/).map(flat).filter(x=>x.length>=2&&x.length<=600&&!UI_PHRASES.test(x)&&!ACTION_RX.test(x)&&!ignored(x));
-  }
-  function directTextBlocks(card){
-    const nodes=[...card.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,label,span,div,article,section')];
-    const out=[],seen=new Set();
-    for(const el of nodes){
-      if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
-      const raw=flat(el.innerText||el.textContent||"");
-      if(raw.length<4||raw.length>700||ignored(raw)||UI_PHRASES.test(raw)||ACTION_RX.test(raw))continue;
-      const descendants=el.querySelector('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],'+INPUT_SELECTOR+',select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]');
-      if(descendants)continue;
-      const r=rect(el),key=raw.toLowerCase();if(seen.has(key))continue;seen.add(key);
-      let score=0;
-      if(/\?$/.test(raw))score+=90;
-      if(QUESTION_RX.test(raw))score+=38;
-      if(/\b(complete|fill|choose|select|calculate|state|identify|for what|to what|at what|in what|give|find|work out)\b/i.test(raw))score+=24;
-      if(raw.length>=12&&raw.length<=360)score+=18;
-      if(VISUAL_RX.test(raw))score+=22;
-      if(r.bottom>=0&&r.top<=innerHeight)score+=4;
-      out.push({el,text:raw,score,top:r.top,bottom:r.bottom,left:r.left,right:r.right});
-    }
-    return out;
-  }
-  function questionFromCard(card,controls){
-    const firstTop=Math.min(...controls.map(c=>rect(c).top));
-    const blocks=directTextBlocks(card).filter(b=>b.bottom<=firstTop+70&&b.bottom>=firstTop-900);
-    const lines=textLines(card);
-    const visualWords=VISUAL_RX.test(lines.join(" "));
-    let candidates=[];
-    if(blocks.length){
-      for(const b of blocks){
-        let score=b.score;
-        score-=Math.max(0,firstTop-b.bottom-280)*0.08;
-        candidates.push({...b,score});
-      }
-      candidates.sort((a,b)=>b.score-a.score);
-    }
-    let q=candidates[0]?.text||"";
-    if(q){
-      const anchor=candidates[0];
-      const parts=candidates.filter(b=>b.bottom<=firstTop+70&&b.top>=anchor.top-320&&b.score>=anchor.score-28).sort((a,b)=>a.top-b.top).slice(0,8).map(b=>b.text);
-      q=flat(parts.join(" "));
-    }
-    const lineCandidates=lines.filter(x=>!controls.some(c=>labelOf(c).toLowerCase()===x.toLowerCase()));
-    const qIndex=lineCandidates.findIndex(x=>/[?]$/.test(x)||QUESTION_RX.test(x));
-    if(qIndex>=0){
-      const lineQ=flat(lineCandidates.slice(Math.max(0,qIndex-2),Math.min(lineCandidates.length,qIndex+3)).join(" "));
-      if(lineQ.length>q.length||/\?$/.test(lineQ)||(!q&&lineQ))q=lineQ;
-    }
-    if(!q&&visualWords)q=lineCandidates.find(x=>x.length>10)||"";
-    return q.slice(0,1000);
-  }
-  function fallbackQuestion(card,options){
-    const optSet=new Set(options.map(x=>x.toLowerCase()));
-    const lines=textLines(card).filter(x=>!optSet.has(x.toLowerCase()));
-    let idx=lines.findIndex(x=>/[?]$/.test(x));
-    if(idx<0)idx=lines.findIndex(x=>QUESTION_RX.test(x));
-    if(idx>=0)return flat(lines.slice(Math.max(0,idx-2),Math.min(lines.length,idx+3)).join(" ")).slice(0,1000);
-    return lines.find(x=>x.length>15&&x.length<420)||"";
-  }
-  function visualMeta(card){
-    const imgs=[...card.querySelectorAll("img")].filter(visible).map(img=>({src:img.currentSrc||img.src,alt:flat(img.alt||img.getAttribute("aria-label")||""),width:img.naturalWidth||img.width,height:img.naturalHeight||img.height})).filter(x=>x.src);
-    const canvases=[...card.querySelectorAll("canvas")].filter(visible).map(c=>{try{return {dataUrl:c.toDataURL("image/png"),width:c.width,height:c.height};}catch{return {width:c.width,height:c.height};}});
-    const svg=[...card.querySelectorAll("svg")].filter(visible).length;
-    const text=flat(card.innerText||card.textContent||"");
-    const hasVisual=imgs.length>0||canvases.length>0||svg>0||VISUAL_RX.test(text);
-    return {images:imgs.slice(0,6),canvases:canvases.slice(0,3),svgCount:svg,hasVisual};
-  }
-  function classify(controls,question,card){
-    const inputs=controls.filter(isTextInput);
-    const radios=controls.filter(x=>x.matches('[role="radio"],input[type="radio"]'));
-    const checks=controls.filter(x=>x.matches('[role="checkbox"],[role="switch"],input[type="checkbox"]'));
-    const drags=controls.filter(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]'));
-    const selects=controls.filter(x=>x.tagName==="SELECT");
-    const opts=unique(controls.filter(x=>!isTextInput(x)&&x.tagName!=="SELECT").map(labelOf));
-    const lower=(question+" "+textOf(card)).toLowerCase();
-    if(drags.length||DRAG_RX.test(lower))return {type:"ordering",options:opts};
-    if(checks.length>=2||/select all that apply|which of these are true|switch the toggles/i.test(lower))return {type:"multi_select",options:opts};
-    if(selects.length)return {type:"choice",options:unique([...selects.map(s=>[...s.options].map(o=>o.text).join(" | "))].filter(Boolean))};
-    if(inputs.length)return {type:"text_input",options:[]};
-    if(radios.length||opts.length>=2)return {type:"choice",options:opts};
-    return null;
-  }
-  function buildActivity(card,controls){
-    if(!card||!controls.length)return null;
-    const provisional=questionFromCard(card,controls)||fallbackQuestion(card,[]);
-    const kind=classify(controls,provisional,card);if(!kind)return null;
-    if(kind.type!=="text_input"&&kind.options.length<2)return null;
-    const question=provisional||fallbackQuestion(card,kind.options);if(!question)return null;
-    const visuals=visualMeta(card);
-    const allText=textLines(card);
-    const instruction=allText.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"";
-    const r=rect(card);
-    const evidence={question:/\?$/.test(question)?3:0,keyword:QUESTION_RX.test(question)?2:0,controls:Math.min(4,controls.length),visual:visuals.hasVisual?1:0,compact:r.width<innerWidth*.97&&r.height<innerHeight*1.2?1:0};
-    const score=Object.values(evidence).reduce((a,b)=>a+b,0);
-    if(score<5)return null;
-    const activity={type:kind.type,question,options:kind.options.slice(0,12),instruction,evidence:score,visuals,cardRect:{left:r.left,top:r.top,width:r.width,height:r.height},controlCount:controls.length};
-    activity.signature=signature(activity);return activity;
-  }
-  function detectActivity(){
-    const controls=allControls();if(!controls.length)return null;
-    const groups=controlGroups(controls),candidates=[];
-    for(const group of groups){
-      if(group.length===1&&!isTextInput(group[0]))continue;
-      for(const card of candidateAncestors(group[0],group)){
-        const activity=buildActivity(card,group);if(!activity)continue;
-        const r=rect(card),centers=group.map(rect).map(center);
-        const cy=centers.reduce((n,p)=>n+p.y,0)/centers.length;
-        let rank=activity.evidence*100000;
-        rank+=Math.min(240000,group.length*26000);
-        rank+=Math.max(0,180000-Math.abs(cy-innerHeight*.52)*1800);
-        rank-=Math.max(0,r.width*r.height-innerWidth*innerHeight*.7)/7;
-        rank-=Math.max(0,r.width-innerWidth*.95)*160;
-        if(activity.type==="text_input")rank+=65000;
-        if(activity.visuals.hasVisual)rank+=22000;
-        if(/\?$/.test(activity.question))rank+=60000;
-        if(VISUAL_RX.test(activity.question))rank+=12000;
-        candidates.push({activity,rank});
-      }
-    }
-    candidates.sort((a,b)=>b.rank-a.rank);
-    const result=candidates[0]?.activity||null;
-    if(result)log("activity_detected",{type:result.type,question:result.question,optionCount:result.options.length,visual:!!result.visuals.hasVisual,groupCount:groups.length,controlCount:result.controlCount,evidence:result.evidence});
-    return result;
-  }
-  function signature(a){return [a.type,a.question,...(a.options||[]),a.instruction||"",a.visuals?.hasVisual?"visual":""].join("|").toLowerCase().replace(/\s+/g," ").slice(0,2200);}
-  function removeRoot(){document.getElementById(ROOT_ID)?.remove();}
+  function labelOf(el){let t=flat(el?.innerText||el?.value||el?.getAttribute?.("aria-label")||el?.getAttribute?.("placeholder")||el?.getAttribute?.("name")||el?.getAttribute?.("title")||el?.getAttribute?.("data-testid")||"");if(!t&&el?.getAttribute?.("aria-labelledby"))t=flat(el.getAttribute("aria-labelledby").split(/\s+/).map(id=>document.getElementById(id)?.innerText||document.getElementById(id)?.textContent||"").join(" "));if(!t&&el?.matches?.("input[type=\"radio\"],input[type=\"checkbox\"],[role=\"radio\"],[role=\"checkbox\"],[role=\"switch\"]"))t=flat(el.closest("label")?.innerText||"");return t;}
+  const ignored=t=>!t||IGNORE.some(rx=>rx.test(t));const isTextInput=el=>!!el?.matches?.(INPUT_SELECTOR);
+  const isAnswerLikeInput=el=>{if(!isTextInput(el)||!visible(el))return false;const s=labelOf(el).toLowerCase();if(/search|find|message|chat|copilot|email|password|login|comment|feedback|url/i.test(s))return false;if(el.closest?.("#"+ROOT_ID))return false;return true;};
+  function allControls(){const selector=OPTION_SELECTOR+','+INPUT_SELECTOR;return [...document.querySelectorAll(selector)].filter(el=>{if(!visible(el))return false;if(isTextInput(el))return isAnswerLikeInput(el);const t=labelOf(el)||flat(el.closest?.("label")?.innerText||el.parentElement?.innerText||"");if(!t||t.length>260||UI_PHRASES.test(t))return false;if(/^(settings|menu|more options|open|help|feedback|share|copy|listen|read aloud)$/i.test(t))return false;return true;});}
+  function unique(items){const out=[],seen=new Set();for(const item of items){const t=flat(item).replace(/^(?:[A-Z]|\d+)[.)]\s*/,"");const k=t.toLowerCase();if(t.length>1&&t.length<300&&!seen.has(k)&&!UI_PHRASES.test(t)){seen.add(k);out.push(t);}}return out.slice(0,12);}
+  function rect(el){return el.getBoundingClientRect();}function center(r){return {x:r.left+r.width/2,y:r.top+r.height/2};}
+  function likelyOption(el){if(!el||isTextInput(el))return false;const t=labelOf(el)||flat(el.closest?.("label")?.innerText||"");if(!t||t.length>180||UI_PHRASES.test(t))return false;const r=rect(el);if(r.width<55||r.height<18)return false;const role=(el.getAttribute("role")||"").toLowerCase(),cls=String(el.className||"").toLowerCase(),testid=String(el.getAttribute("data-testid")||"").toLowerCase(),tagged=el.hasAttribute("data-option")||el.hasAttribute("data-answer")||el.hasAttribute("data-choice");return role==="radio"||role==="checkbox"||role==="switch"||role==="option"||/option|answer|choice|response|selectable|quiz/i.test(cls)||/option|answer|choice|response/i.test(testid)||tagged||el.tagName==="BUTTON"||el.hasAttribute("aria-pressed")||el.hasAttribute("aria-checked")||el.hasAttribute("aria-selected");}
+  function controlGroups(list){const candidates=list.filter(el=>isTextInput(el)||likelyOption(el)),unused=new Set(candidates),groups=[];while(unused.size){const seed=unused.values().next().value;unused.delete(seed);const group=[seed];let changed=true;while(changed){changed=false;for(const el of [...unused]){const r=rect(el),close=group.some(g=>{const q=rect(g),vGap=Math.min(Math.abs(r.top-q.bottom),Math.abs(q.top-r.bottom)),hGap=Math.min(Math.abs(r.left-q.right),Math.abs(q.left-r.right)),sameRow=Math.abs(center(r).y-center(q).y)<=Math.max(r.height,q.height)*1.35,sameCol=Math.abs(center(r).x-center(q).x)<=Math.max(r.width,q.width)*0.28,similar=Math.max(r.width,q.width)/Math.max(1,Math.min(r.width,q.width))<2.2;return similar&&((sameRow&&hGap<90)||(sameCol&&vGap<130));});if(close){group.push(el);unused.delete(el);changed=true;}}}if(group.length>=1)groups.push(group);}return groups.sort((a,b)=>b.length-a.length);}
+  function candidateAncestors(seed,group){const out=[],seen=new Set();let el=seed;for(let depth=0;el&&depth<18;depth++,el=el.parentElement){if(seen.has(el))continue;seen.add(el);if(el===document.body||el===document.documentElement)break;const r=rect(el);if(r.width<220||r.height<55)continue;if(r.width>innerWidth*.97&&r.height>innerHeight*.9)continue;if(r.height>innerHeight*1.35)continue;if(!group.every(c=>el.contains(c)))continue;const local=[...el.querySelectorAll(OPTION_SELECTOR+','+INPUT_SELECTOR)].filter(visible);if(local.length>Math.max(18,group.length+9))continue;const text=flat(el.innerText||el.textContent||"");if(text.length>5000)continue;out.push(el);}return out;}
+  function textLines(card){return clean(card.innerText||card.textContent||"").split(/\n+/).map(flat).filter(x=>x.length>=2&&x.length<=600&&!UI_PHRASES.test(x)&&!ACTION_RX.test(x)&&!ignored(x));}
+  function directTextBlocks(card){const nodes=[...card.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,label,span,div,article,section')],out=[],seen=new Set();for(const el of nodes){if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;const raw=flat(el.innerText||el.textContent||"");if(raw.length<4||raw.length>700||ignored(raw)||UI_PHRASES.test(raw)||ACTION_RX.test(raw))continue;const descendants=el.querySelector(OPTION_SELECTOR+','+INPUT_SELECTOR);if(descendants)continue;const r=rect(el),key=raw.toLowerCase();if(seen.has(key))continue;seen.add(key);let score=0;if(/\?$/.test(raw))score+=90;if(QUESTION_RX.test(raw))score+=38;if(/\b(complete|fill|choose|select|calculate|state|identify|for what|to what|at what|in what|give|find|work out)\b/i.test(raw))score+=24;if(raw.length>=12&&raw.length<=360)score+=18;if(VISUAL_RX.test(raw))score+=22;if(r.bottom>=0&&r.top<=innerHeight)score+=4;out.push({el,text:raw,score,top:r.top,bottom:r.bottom,left:r.left,right:r.right});}return out;}
+  function questionFromCard(card,controls){const firstTop=Math.min(...controls.map(c=>rect(c).top)),blocks=directTextBlocks(card).filter(b=>b.bottom<=firstTop+70&&b.bottom>=firstTop-900),lines=textLines(card),visualWords=VISUAL_RX.test(lines.join(" "));let candidates=[];if(blocks.length){for(const b of blocks){let score=b.score;score-=Math.max(0,firstTop-b.bottom-280)*.08;candidates.push({...b,score});}candidates.sort((a,b)=>b.score-a.score);}let q=candidates[0]?.text||"";if(q){const anchor=candidates[0],parts=candidates.filter(b=>b.bottom<=firstTop+70&&b.top>=anchor.top-320&&b.score>=anchor.score-28).sort((a,b)=>a.top-b.top).slice(0,8).map(b=>b.text);q=flat(parts.join(" "));}const lineCandidates=lines.filter(x=>!controls.some(c=>labelOf(c).toLowerCase()===x.toLowerCase())),qIndex=lineCandidates.findIndex(x=>/[?]$/.test(x)||QUESTION_RX.test(x));if(qIndex>=0){const lineQ=flat(lineCandidates.slice(Math.max(0,qIndex-2),Math.min(lineCandidates.length,qIndex+3)).join(" "));if(lineQ.length>q.length||/[?]$/.test(lineQ)||(!q&&lineQ))q=lineQ;}if(!q&&visualWords)q=lineCandidates.find(x=>x.length>10)||"";return q.slice(0,1000);}
+  function fallbackQuestion(card,options){const optSet=new Set(options.map(x=>x.toLowerCase())),lines=textLines(card).filter(x=>!optSet.has(x.toLowerCase()));let idx=lines.findIndex(x=>/[?]$/.test(x));if(idx<0)idx=lines.findIndex(x=>QUESTION_RX.test(x));if(idx>=0)return flat(lines.slice(Math.max(0,idx-2),Math.min(lines.length,idx+3)).join(" ")).slice(0,1000);return lines.find(x=>x.length>15&&x.length<420)||"";}
+  function visualMeta(card){const imgs=[...card.querySelectorAll("img")].filter(visible).map(img=>({src:img.currentSrc||img.src,alt:flat(img.alt||img.getAttribute("aria-label")||""),width:img.naturalWidth||img.width,height:img.naturalHeight||img.height})).filter(x=>x.src);const canvases=[...card.querySelectorAll("canvas")].filter(visible).map(c=>{try{return {dataUrl:c.toDataURL("image/png"),width:c.width,height:c.height};}catch{return {width:c.width,height:c.height};}});const svg=[...card.querySelectorAll("svg")].filter(visible).length,text=flat(card.innerText||card.textContent||"");return {images:imgs.slice(0,6),canvases:canvases.slice(0,3),svgCount:svg,hasVisual:imgs.length>0||canvases.length>0||svg>0||VISUAL_RX.test(text)};}
+  function classify(controls,question,card){const inputs=controls.filter(isTextInput),radios=controls.filter(x=>x.matches('[role="radio"],input[type="radio"]')),checks=controls.filter(x=>x.matches('[role="checkbox"],[role="switch"],input[type="checkbox"]')),drags=controls.filter(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')),selects=controls.filter(x=>x.tagName==="SELECT"),opts=unique(controls.filter(x=>!isTextInput(x)&&x.tagName!=="SELECT").map(x=>labelOf(x)||flat(x.closest?.("label")?.innerText||""))),lower=(question+" "+textOf(card)).toLowerCase();if(drags.length||DRAG_RX.test(lower))return {type:"ordering",options:opts};if(checks.length>=2||/select all that apply|which of these are true|switch the toggles/i.test(lower))return {type:"multi_select",options:opts};if(selects.length)return {type:"choice",options:unique([...selects.map(s=>[...s.options].map(o=>o.text).join(" | "))].filter(Boolean))};if(inputs.length)return {type:"text_input",options:[]};if(radios.length||opts.length>=2)return {type:"choice",options:opts};return null;}
+  function buildActivity(card,controls){if(!card||!controls.length)return null;const provisional=questionFromCard(card,controls)||fallbackQuestion(card,[]),kind=classify(controls,provisional,card);if(!kind)return null;if(kind.type!=="text_input"&&kind.options.length<2)return null;const question=provisional||fallbackQuestion(card,kind.options);if(!question)return null;const visuals=visualMeta(card),allText=textLines(card),instruction=allText.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"",r=rect(card),evidence={question:/\?$/.test(question)?3:0,keyword:QUESTION_RX.test(question)?2:0,controls:Math.min(4,controls.length),visual:visuals.hasVisual?1:0,compact:r.width<innerWidth*.97&&r.height<innerHeight*1.2?1:0},score=Object.values(evidence).reduce((a,b)=>a+b,0);if(score<5)return null;const activity={type:kind.type,question,options:kind.options.slice(0,12),instruction,evidence:score,visuals,cardRect:{left:r.left,top:r.top,width:r.width,height:r.height},controlCount:controls.length};activity.signature=signature(activity);return activity;}
+  function detectActivity(){const controls=allControls();if(!controls.length)return null;const groups=controlGroups(controls),candidates=[];for(const group of groups){if(group.length===1&&!isTextInput(group[0]))continue;for(const card of candidateAncestors(group[0],group)){const activity=buildActivity(card,group);if(!activity)continue;const r=rect(card),centers=group.map(rect).map(center),cy=centers.reduce((n,p)=>n+p.y,0)/centers.length;let rank=activity.evidence*100000;rank+=Math.min(240000,group.length*26000);rank+=Math.max(0,180000-Math.abs(cy-innerHeight*.52)*1800);rank-=Math.max(0,r.width*r.height-innerWidth*innerHeight*.7)/7;rank-=Math.max(0,r.width-innerWidth*.95)*160;if(activity.type==="text_input")rank+=65000;if(activity.visuals.hasVisual)rank+=22000;if(/\?$/.test(activity.question))rank+=60000;if(VISUAL_RX.test(activity.question))rank+=12000;candidates.push({activity,rank});}}candidates.sort((a,b)=>b.rank-a.rank);const result=candidates[0]?.activity||null;if(result)log("activity_detected",{type:result.type,question:result.question,optionCount:result.options.length,visual:!!result.visuals.hasVisual,groupCount:groups.length,controlCount:result.controlCount,evidence:result.evidence});return result;}
+  function signature(a){return [a.type,a.question,...(a.options||[]),a.instruction||"",a.visuals?.hasVisual?"visual":""].join("|").toLowerCase().replace(/\s+/g," ").slice(0,2200);}function removeRoot(){document.getElementById(ROOT_ID)?.remove();}
   function preview(a){const bits=[a.question];if(a.options?.length)bits.push("Options: "+a.options.join(" • "));if(a.visuals?.hasVisual)bits.push("Visual: image/graph detected");return clean(bits.join("\n")).slice(0,1100);}
-  function mount(activity){
-    const sig=activity.signature;if(!activity.question||sig===dismissedSignature)return;if(sig===lastSignature&&document.getElementById(ROOT_ID))return;
-    lastSignature=sig;dismissedSignature="";removeRoot();
-    const root=document.createElement("div");root.id=ROOT_ID;
-    root.innerHTML=`<div class="sh-card"><div class="sh-head"><strong>Study Helper V${VERSION}</strong><button class="sh-close" title="Hide this question">×</button></div><div class="sh-label"><span class="sh-type"></span> activity detected</div><div class="sh-question"></div><div class="sh-actions"><button class="sh-hint">Hint</button><button class="sh-explain">Explain</button><button class="sh-answer">Quick answer</button></div><div class="sh-status"></div><div class="sh-response"></div><button class="sh-copy" hidden>Copy answer</button></div>`;
-    root.querySelector(".sh-type").textContent=activity.type.replace("_"," ");root.querySelector(".sh-question").textContent=preview(activity);
-    root.querySelector(".sh-close").onclick=()=>{dismissedSignature=sig;root.remove();log("activity_dismissed",{signature:sig.slice(0,120)});};
-    root.querySelector(".sh-hint").onclick=()=>analyse("hint",activity,root);root.querySelector(".sh-explain").onclick=()=>analyse("explain",activity,root);root.querySelector(".sh-answer").onclick=()=>analyse("answer",activity,root);
-    root.querySelector(".sh-copy").onclick=async()=>{const t=root.querySelector(".sh-response").textContent;try{await navigator.clipboard.writeText(t);root.querySelector(".sh-copy").textContent="Copied!";setTimeout(()=>root.querySelector(".sh-copy").textContent="Copy answer",1200);log("answer_copied");}catch(e){log("copy_failed",{error:e.message});}};
-    document.documentElement.appendChild(root);log("panel_mounted",{type:activity.type,question:activity.question,visual:!!activity.visuals.hasVisual,evidence:activity.evidence});
-    if(contextAlive())chrome.storage.local.get(["rapidAutoAnalyse"],d=>{if(d.rapidAutoAnalyse&&!rapidAnalysed.has(sig)){rapidAnalysed.add(sig);analyse("answer",activity,root);}});
-  }
-  async function prepareVisuals(visuals){
-    const out=[];
-    for(const c of visuals.canvases||[])if(c.dataUrl)out.push({type:"data",data:c.dataUrl,source:"canvas"});
-    for(const img of visuals.images||[]){
-      try{const r=await fetch(img.src,{credentials:"include",cache:"force-cache"});if(r.ok){const b=await r.blob();const data=await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(fr.result);fr.onerror=reject;fr.readAsDataURL(b);});out.push({type:"data",data,source:"img"});continue;}}catch{}
-      out.push({type:"url",url:img.src,source:"img-url"});
-    }
-    return out.slice(0,5);
-  }
-  async function analyse(mode,activity,root){
-    if(!root.isConnected||dead)return;
-    const key=mode+"|"+activity.signature,status=root.querySelector(".sh-status"),response=root.querySelector(".sh-response"),copy=root.querySelector(".sh-copy");
-    if(cache.has(key)){status.textContent="Cached result";response.textContent=cache.get(key).text;copy.hidden=mode!=="answer";return;}
-    if(analysing){status.textContent="Please wait for the current response…";return;}
-    analysing=true;status.textContent=mode==="hint"?"Getting hint…":mode==="answer"?"Getting quick answer…":"Explaining…";response.textContent="";copy.hidden=true;
-    log("analysis_started",{mode,type:activity.type,question:activity.question,visual:!!activity.visuals.hasVisual});
-    try{
-      const prepared={...activity,visualInputs:await prepareVisuals(activity.visuals||{})};
-      if(activity.visuals?.hasVisual){
-        const shot=await sendMessage({type:"study-helper-capture-tab",cardRect:activity.cardRect});
-        if(shot?.ok&&shot.dataUrl)prepared.visualInputs=[...prepared.visualInputs,{type:"data",data:shot.dataUrl,source:"tab-capture"}].slice(0,6);
-        log("visual_capture",{ok:!!shot?.ok,sourceCount:prepared.visualInputs.length});
-      }
-      const r=await sendMessage({type:"study-helper-analyse",mode,activity:prepared});
-      if(!r?.ok)throw new Error(r?.error||"Analysis failed");
-      if(!flat(r.text))throw new Error("AI returned an empty response");
-      cache.set(key,r);if(cache.size>80)cache.delete(cache.keys().next().value);
-      if(root.isConnected){status.textContent="AI: "+r.provider;response.textContent=r.text;copy.hidden=mode!=="answer";}
-      log("analysis_succeeded",{mode,provider:r.provider,chars:String(r.text).length,visual:!!activity.visuals.hasVisual});
-    }catch(e){if(root.isConnected)status.textContent="Error: "+e.message;log("analysis_failed",{mode,error:String(e?.message||e)});}finally{analysing=false;}
-  }
-  function scan(){
-    if(dead)return;
-    const now=Date.now();if(now-lastScanAt<140)return;lastScanAt=now;
-    const activity=detectActivity();if(!activity){pending="";pendingSince=0;return;}
-    const sig=activity.signature;
-    if(sig!==pending){pending=sig;pendingSince=now;clearTimeout(debounce);debounce=setTimeout(()=>{if(dead)return;const confirmed=detectActivity();if(confirmed&&confirmed.signature===sig)mount(confirmed);},320);return;}
-    if(now-pendingSince>=180)mount(activity);
-  }
-  observer=new MutationObserver(()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140);});
-  observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
-  addEventListener("scroll",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140)},{passive:true});
-  addEventListener("resize",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140)});
-  setTimeout(scan,650);scanTimer=setInterval(scan,800);
-  log("content_loaded",{version:VERSION,url:location.href});
+  function mount(activity){const sig=activity.signature;if(!activity.question||sig===dismissedSignature)return;if(sig===lastSignature&&document.getElementById(ROOT_ID))return;lastSignature=sig;dismissedSignature="";removeRoot();const root=document.createElement("div");root.id=ROOT_ID;root.innerHTML=`<div class="sh-card"><div class="sh-head"><strong>Study Helper V${VERSION}</strong><button class="sh-close" title="Hide this question">×</button></div><div class="sh-label"><span class="sh-type"></span> activity detected</div><div class="sh-question"></div><div class="sh-actions"><button class="sh-hint">Hint</button><button class="sh-explain">Explain</button><button class="sh-answer">Quick answer</button></div><div class="sh-status"></div><div class="sh-response"></div><button class="sh-copy" hidden>Copy answer</button></div>`;root.querySelector(".sh-type").textContent=activity.type.replace("_"," ");root.querySelector(".sh-question").textContent=preview(activity);root.querySelector(".sh-close").onclick=()=>{dismissedSignature=sig;root.remove();log("activity_dismissed",{signature:sig.slice(0,120)});};root.querySelector(".sh-hint").onclick=()=>analyse("hint",activity,root);root.querySelector(".sh-explain").onclick=()=>analyse("explain",activity,root);root.querySelector(".sh-answer").onclick=()=>analyse("answer",activity,root);root.querySelector(".sh-copy").onclick=async()=>{const t=root.querySelector(".sh-response").textContent;try{await navigator.clipboard.writeText(t);root.querySelector(".sh-copy").textContent="Copied!";setTimeout(()=>root.querySelector(".sh-copy").textContent="Copy answer",1200);log("answer_copied");}catch(e){log("copy_failed",{error:e.message});}};document.documentElement.appendChild(root);log("panel_mounted",{type:activity.type,question:activity.question,visual:!!activity.visuals.hasVisual,evidence:activity.evidence});if(contextAlive())chrome.storage.local.get(["rapidAutoAnalyse"],d=>{if(d.rapidAutoAnalyse&&!rapidAnalysed.has(sig)){rapidAnalysed.add(sig);analyse("answer",activity,root);}});}
+  async function prepareVisuals(visuals){const out=[];for(const c of visuals.canvases||[])if(c.dataUrl)out.push({type:"data",data:c.dataUrl,source:"canvas"});for(const img of visuals.images||[]){try{const r=await fetch(img.src,{credentials:"include",cache:"force-cache"});if(r.ok){const b=await r.blob(),data=await new Promise((resolve,reject)=>{const fr=new FileReader();fr.onload=()=>resolve(fr.result);fr.onerror=reject;fr.readAsDataURL(b);});out.push({type:"data",data,source:"img"});continue;}}catch{}out.push({type:"url",url:img.src,source:"img-url"});}return out.slice(0,5);}
+  async function cropCapture(dataUrl,cardRect){if(!dataUrl||!cardRect)return dataUrl;try{const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=reject;i.src=dataUrl;});const sx=Math.max(0,Math.floor(cardRect.left*devicePixelRatio)),sy=Math.max(0,Math.floor(cardRect.top*devicePixelRatio)),sw=Math.min(img.naturalWidth-sx,Math.max(1,Math.ceil(cardRect.width*devicePixelRatio))),sh=Math.min(img.naturalHeight-sy,Math.max(1,Math.ceil(cardRect.height*devicePixelRatio)));if(sw<=1||sh<=1)return dataUrl;const maxW=1800,maxH=1800,scale=Math.min(1,maxW/sw,maxH/sh),c=document.createElement("canvas");c.width=Math.max(1,Math.floor(sw*scale));c.height=Math.max(1,Math.floor(sh*scale));c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c.toDataURL("image/png");}catch{return dataUrl;}}
+  async function analyse(mode,activity,root){if(!root.isConnected||dead)return;const key=mode+"|"+activity.signature,status=root.querySelector(".sh-status"),response=root.querySelector(".sh-response"),copy=root.querySelector(".sh-copy");if(cache.has(key)){status.textContent="Cached result";response.textContent=cache.get(key).text;copy.hidden=mode!=="answer";return;}if(analysing){status.textContent="Please wait for the current response…";return;}analysing=true;status.textContent=mode==="hint"?"Getting hint…":mode==="answer"?"Getting quick answer…":"Explaining…";response.textContent="";copy.hidden=true;log("analysis_started",{mode,type:activity.type,question:activity.question,visual:!!activity.visuals.hasVisual});try{const prepared={...activity,visualInputs:await prepareVisuals(activity.visuals||{})};if(activity.visuals?.hasVisual){const shot=await sendMessage({type:"study-helper-capture-tab",cardRect:activity.cardRect});if(shot?.ok&&shot.dataUrl){const cropped=await cropCapture(shot.dataUrl,activity.cardRect);prepared.visualInputs=[...prepared.visualInputs,{type:"data",data:cropped,source:"tab-capture-cropped"}].slice(0,6);}log("visual_capture",{ok:!!shot?.ok,sourceCount:prepared.visualInputs.length});}const r=await sendMessage({type:"study-helper-analyse",mode,activity:prepared});if(!r?.ok)throw new Error(r?.error||"Analysis failed");if(!flat(r.text))throw new Error("AI returned an empty response");cache.set(key,r);if(cache.size>80)cache.delete(cache.keys().next().value);if(root.isConnected){status.textContent="AI: "+r.provider;response.textContent=r.text;copy.hidden=mode!=="answer";}log("analysis_succeeded",{mode,provider:r.provider,chars:String(r.text).length,visual:!!activity.visuals.hasVisual});}catch(e){if(root.isConnected)status.textContent="Error: "+e.message;log("analysis_failed",{mode,error:String(e?.message||e)});}finally{analysing=false;}}
+  function scan(){if(dead)return;const now=Date.now();if(now-lastScanAt<140)return;lastScanAt=now;const activity=detectActivity();if(!activity){pending="";pendingSince=0;return;}const sig=activity.signature;if(sig!==pending){pending=sig;pendingSince=now;clearTimeout(debounce);debounce=setTimeout(()=>{if(dead)return;const confirmed=detectActivity();if(confirmed&&confirmed.signature===sig)mount(confirmed);},320);return;}if(now-pendingSince>=180)mount(activity);}
+  observer=new MutationObserver(()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140);});observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});addEventListener("scroll",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140)},{passive:true});addEventListener("resize",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140)});setTimeout(scan,650);scanTimer=setInterval(scan,800);log("content_loaded",{version:VERSION,url:location.href});
 })();
