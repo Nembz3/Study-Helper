@@ -23,9 +23,13 @@ function promptFor(mode,a){
   return lines.join("\n");
 }
 function openAIContent(prompt,visuals){if(!visuals.length)return prompt;return [{type:"text",text:prompt},...visuals.map(v=>v.type==="data"?{type:"image_url",image_url:{url:v.data}}:{type:"image_url",image_url:{url:v.url}})];}
+async function fetchWithTimeout(url,options,ms=20000){
+  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),ms);
+  try{return await fetch(url,{...options,signal:controller.signal});}catch(e){if(e?.name==="AbortError")throw new Error("Request timed out after 20 seconds");throw e;}finally{clearTimeout(timer);}
+}
 async function callOpenAI(p,key,model,prompt,maxTokens,visuals){
   const body={model,messages:[{role:"system",content:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. If an image is attached, inspect it carefully. Focus on the Seneca question card and ignore browser chrome, sidebars and extension UI."},{role:"user",content:openAIContent(prompt,visuals)}],temperature:0.15,max_tokens:maxTokens};
-  const r=await fetch(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify(body)});
+  const r=await fetchWithTimeout(p.url,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},body:JSON.stringify(body)});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`${p.id}: ${j?.error?.message||r.statusText||r.status}`);
   const text=j?.choices?.[0]?.message?.content||"";if(!clean(text))throw new Error(`${p.id}: Empty response`);return clean(text);
 }
@@ -33,7 +37,7 @@ async function callGemini(key,model,prompt,maxTokens,visuals){
   const parts=[{text:"You are an accurate, concise UK secondary-school study tutor. Always return plain text. Focus on the Seneca question card and ignore browser chrome, sidebars and extension UI.\n\n"+prompt}];
   for(const v of visuals){if(v.type==="data"){const m=String(v.data).match(/^data:([^;]+);base64,(.+)$/s);if(m)parts.push({inlineData:{mimeType:m[1],data:m[2]}});}}
   const url="https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent?key="+encodeURIComponent(key);
-  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{maxOutputTokens:maxTokens}})});
+  const r=await fetchWithTimeout(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({contents:[{role:"user",parts}],generationConfig:{maxOutputTokens:maxTokens}})});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(`Gemini: ${j?.error?.message||r.statusText||r.status}`);
   const text=(j?.candidates||[]).flatMap(c=>c?.content?.parts||[]).map(x=>x?.text||"").join(" ");if(!clean(text))throw new Error("Gemini: Empty response");return clean(text);
 }
