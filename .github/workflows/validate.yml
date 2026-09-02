@@ -1,0 +1,43 @@
+name: Validate extension
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate JavaScript
+        run: |
+          node --check background.js
+          node --check content.js
+          node --check content-recovery.js
+          node --check popup.js
+
+      - name: Validate manifest
+        run: python -m json.tool manifest.json >/dev/null
+
+      - name: Verify version consistency
+        shell: bash
+        run: |
+          VERSION=$(tr -d '\r\n' < VERSION)
+          MANIFEST=$(python - <<'PY'
+          import json
+          print(json.load(open('manifest.json'))['version'])
+          PY
+          )
+          if [ "$VERSION" != "$MANIFEST" ]; then
+            echo "VERSION ($VERSION) does not match manifest.json ($MANIFEST)"
+            exit 1
+          fi
