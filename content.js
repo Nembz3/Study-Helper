@@ -1,23 +1,24 @@
 (()=>{
   const ROOT_ID="study-helper-v3-root";
-  const VERSION="3.8.0";
+  const VERSION="3.9.0";
   const IGNORE=[
     /tasks completed/i,/\bup next\b/i,/\bsection complete\b/i,/your memory has been stored/i,
     /memory strength/i,/time spent/i,/current level/i,/\btotal xp\b/i,/choose where to store your memory/i,
     /summer revision/i,/^assignment$/i,/^quiz$/i,/^wrong answers$/i,/how do you want to learn/i
   ];
-  const UI_PHRASES=/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar|flag|close|scroll down to continue|switch the toggles|choose an answer|reveal answer|next|back|continue|skip|exit|home)$/i;
+  const UI_PHRASES=/^(report a problem|start reading text|stop reading text|topic notes|collapse toolbar|expand toolbar|flag|close|scroll down to continue|switch the toggles|choose an answer|reveal answer|next|back|continue|skip|exit|home|more options|settings|help|share|copy|listen|read aloud)$/i;
   const ACTION_RX=/\b(reveal answer|choose an answer|select an answer|type your answer|check answer|submit|switch the toggles|drag into the correct order|select all that apply|fill in|fill the gaps?|choose one)\b/i;
-  const QUESTION_RX=/\b(what|which|where|when|why|how|who|name|complete|match|choose|select|fill|type|drag|connect|identify|state|calculate|write|put|sort|order|arrange|true|false|for what|to what|at what|in what|by what|percentage|percent|value|speed|distance|time|graph|diagram|image|figure|equation|formula|mass|volume|temperature|force|energy|velocity|resultant)\b/i;
+  const QUESTION_RX=/\b(what|which|where|when|why|how|who|name|complete|match|choose|select|fill|type|drag|connect|identify|state|calculate|write|put|sort|order|arrange|true|false|for what|to what|at what|in what|by what|percentage|percent|value|speed|distance|time|graph|diagram|image|figure|equation|formula|mass|volume|temperature|force|energy|velocity|resultant|according|describe|explain|give|state|work out|find)\b/i;
+  const VISUAL_RX=/\b(graph|diagram|image|figure|chart|plot|shown below|shown above|picture|photo|illustration|table|map)\b/i;
   const DRAG_RX=/\b(drag|drop|correct order|arrange|reorder|sort|move)\b/i;
-  const INPUT_SELECTOR='input:not([type="hidden"]),textarea,[contenteditable="true"]';
+  const INPUT_SELECTOR='input:not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="reset"]),textarea,[contenteditable="true"],[role="textbox"]';
   let lastSignature="",dismissedSignature="",analysing=false,debounce,lastScanAt=0,pending="",pendingSince=0,dead=false;
   const cache=new Map(),rapidAnalysed=new Set();
   let observer=null,scanTimer=null;
   const clean=s=>(s||"").replace(/\u00a0/g," ").replace(/[ \t\r\f]+/g," ").replace(/\n{2,}/g,"\n").trim();
   const flat=s=>clean(s).replace(/\s+/g," ").trim();
   function contextAlive(){try{return !!chrome?.runtime?.id;}catch{return false;}}
-  function killContext(){if(dead)return;dead=true;try{observer?.disconnect();}catch{};try{clearInterval(scanTimer);}catch{};clearTimeout(debounce);}
+  function killContext(){if(dead)return;dead=true;try{observer?.disconnect();}catch{}try{clearInterval(scanTimer);}catch{}clearTimeout(debounce);}
   async function sendMessage(message){
     if(!contextAlive()){killContext();return {ok:false,error:"Extension was reloaded. Refresh this Seneca tab."};}
     try{return await chrome.runtime.sendMessage(message);}catch(e){
@@ -30,20 +31,24 @@
   function visible(el){
     if(!el||el.closest?.("#"+ROOT_ID))return false;
     const r=el.getBoundingClientRect(),s=getComputedStyle(el);
-    return r.width>10&&r.height>8&&s.display!=="none"&&s.visibility!=="hidden"&&s.opacity!=="0"&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;
+    return r.width>8&&r.height>6&&s.display!=="none"&&s.visibility!=="hidden"&&s.opacity!=="0"&&r.bottom>0&&r.top<innerHeight&&r.right>0&&r.left<innerWidth;
   }
   const textOf=el=>flat(el?.innerText||el?.textContent||"");
   const labelOf=el=>flat(el?.innerText||el?.value||el?.getAttribute?.("aria-label")||el?.getAttribute?.("placeholder")||el?.getAttribute?.("name")||el?.getAttribute?.("title")||el?.getAttribute?.("data-testid")||"");
   const ignored=t=>!t||IGNORE.some(rx=>rx.test(t));
   const isTextInput=el=>!!el?.matches?.(INPUT_SELECTOR);
+  const isAnswerLikeInput=el=>{
+    if(!isTextInput(el)||!visible(el))return false;
+    const s=labelOf(el).toLowerCase();
+    if(/search|find|message|chat|copilot|email|password|login|comment|feedback|url/i.test(s))return false;
+    if(el.closest?.("#"+ROOT_ID))return false;
+    return true;
+  };
   function allControls(){
-    const selector='button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input:not([type="hidden"]),textarea,[contenteditable="true"],select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]';
+    const selector='button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],'+INPUT_SELECTOR+',select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]';
     return [...document.querySelectorAll(selector)].filter(el=>{
       if(!visible(el))return false;
-      if(isTextInput(el)){
-        const ph=labelOf(el).toLowerCase();
-        return !/search|find|message|chat|copilot|email|password|login/i.test(ph);
-      }
+      if(isTextInput(el))return isAnswerLikeInput(el);
       const t=labelOf(el);
       if(!t||t.length>260||UI_PHRASES.test(t))return false;
       if(/^(settings|menu|more options|open|help|feedback|share|copy|listen|read aloud)$/i.test(t))return false;
@@ -62,8 +67,19 @@
   function rect(el){return el.getBoundingClientRect();}
   function center(r){return {x:r.left+r.width/2,y:r.top+r.height/2};}
   function overlapX(a,b){return Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left));}
+  function likelyOption(el){
+    if(!el||isTextInput(el))return false;
+    const t=labelOf(el);
+    if(!t||t.length>180||UI_PHRASES.test(t))return false;
+    const r=rect(el);
+    if(r.width<70||r.height<20)return false;
+    const role=(el.getAttribute("role")||"").toLowerCase();
+    const cls=String(el.className||"").toLowerCase();
+    return role==="radio"||role==="checkbox"||/option|answer|choice|response|selectable|quiz/i.test(cls)||el.tagName==="BUTTON"||el.hasAttribute("aria-pressed")||el.hasAttribute("aria-checked");
+  }
   function controlGroups(list){
-    const unused=new Set(list),groups=[];
+    const candidates=list.filter(el=>isTextInput(el)||likelyOption(el));
+    const unused=new Set(candidates),groups=[];
     while(unused.size){
       const seed=unused.values().next().value;unused.delete(seed);
       const group=[seed];let changed=true;
@@ -72,81 +88,105 @@
         for(const el of [...unused]){
           const r=rect(el);
           const close=group.some(g=>{
-            const q=rect(g),vGap=Math.min(Math.abs(r.top-q.bottom),Math.abs(q.top-r.bottom));
-            const sameRow=Math.abs(center(r).y-center(q).y)<Math.max(r.height,q.height)*1.8;
-            return vGap<180&&(overlapX(r,q)>Math.min(r.width,q.width)*0.12||sameRow);
+            const q=rect(g);
+            const vGap=Math.min(Math.abs(r.top-q.bottom),Math.abs(q.top-r.bottom));
+            const hGap=Math.min(Math.abs(r.left-q.right),Math.abs(q.left-r.right));
+            const sameRow=Math.abs(center(r).y-center(q).y)<=Math.max(r.height,q.height)*1.35;
+            const sameCol=Math.abs(center(r).x-center(q).x)<=Math.max(r.width,q.width)*0.28;
+            const similar=Math.max(r.width,q.width)/Math.max(1,Math.min(r.width,q.width))<2.2;
+            return similar&&((sameRow&&hGap<90)||(sameCol&&vGap<130));
           });
           if(close){group.push(el);unused.delete(el);changed=true;}
         }
       }
-      groups.push(group);
+      if(group.length>=1)groups.push(group);
     }
-    return groups.filter(g=>g.length);
+    return groups.sort((a,b)=>b.length-a.length);
   }
   function candidateAncestors(seed,group){
     const out=[],seen=new Set();let el=seed;
-    for(let depth=0;el&&depth<14;depth++,el=el.parentElement){
+    for(let depth=0;el&&depth<18;depth++,el=el.parentElement){
       if(seen.has(el))continue;seen.add(el);
       if(el===document.body||el===document.documentElement)break;
-      const r=rect(el);if(r.width<180||r.height<40)continue;
-      if(r.width>innerWidth*0.98&&r.height>innerHeight*0.9)continue;
-      if(r.height>innerHeight*1.25)continue;
-      const contained=group.every(c=>el.contains(c));
-      if(contained)out.push(el);
+      const r=rect(el);if(r.width<220||r.height<55)continue;
+      if(r.width>innerWidth*0.97&&r.height>innerHeight*0.9)continue;
+      if(r.height>innerHeight*1.35)continue;
+      if(!group.every(c=>el.contains(c)))continue;
+      const local=[...el.querySelectorAll('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],'+INPUT_SELECTOR+',select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]')].filter(visible);
+      if(local.length>Math.max(14,group.length+7))continue;
+      const text=flat(el.innerText||el.textContent||"");
+      if(text.length>5000)continue;
+      out.push(el);
     }
     return out;
   }
-  function directTextBlocks(group){
-    const nodes=[...group.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,label,span,div,article,section')];
+  function textLines(card){
+    return clean(card.innerText||card.textContent||"").split(/\n+/).map(flat).filter(x=>x.length>=2&&x.length<=600&&!UI_PHRASES.test(x)&&!ACTION_RX.test(x)&&!ignored(x));
+  }
+  function directTextBlocks(card){
+    const nodes=[...card.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,label,span,div,article,section')];
     const out=[],seen=new Set();
     for(const el of nodes){
       if(!visible(el)||el.closest?.("#"+ROOT_ID))continue;
-      if(el.querySelector('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],input,textarea,select,[contenteditable="true"],[draggable="true"]'))continue;
       const raw=flat(el.innerText||el.textContent||"");
-      if(raw.length<4||raw.length>650||ignored(raw)||UI_PHRASES.test(raw)||ACTION_RX.test(raw))continue;
-      const r=rect(el);
-      const key=raw.toLowerCase();
-      if(seen.has(key))continue;seen.add(key);
+      if(raw.length<4||raw.length>700||ignored(raw)||UI_PHRASES.test(raw)||ACTION_RX.test(raw))continue;
+      const descendants=el.querySelector('button,[role="button"],[role="radio"],[role="checkbox"],[role="switch"],'+INPUT_SELECTOR+',select,[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]');
+      if(descendants)continue;
+      const r=rect(el),key=raw.toLowerCase();if(seen.has(key))continue;seen.add(key);
       let score=0;
-      if(/\?$/.test(raw))score+=70;
-      if(QUESTION_RX.test(raw))score+=30;
-      if(/\b(complete|fill|choose|select|calculate|state|identify|for what|to what|at what|in what)\b/i.test(raw))score+=22;
-      if(raw.length>=12&&raw.length<=320)score+=14;
-      if(/\b(graph|diagram|image|figure|chart|shown below|shown above|picture|photo)\b/i.test(raw))score+=18;
+      if(/\?$/.test(raw))score+=90;
+      if(QUESTION_RX.test(raw))score+=38;
+      if(/\b(complete|fill|choose|select|calculate|state|identify|for what|to what|at what|in what|give|find|work out)\b/i.test(raw))score+=24;
+      if(raw.length>=12&&raw.length<=360)score+=18;
+      if(VISUAL_RX.test(raw))score+=22;
+      if(r.bottom>=0&&r.top<=innerHeight)score+=4;
       out.push({el,text:raw,score,top:r.top,bottom:r.bottom,left:r.left,right:r.right});
     }
     return out;
   }
   function questionFromCard(card,controls){
-    const blocks=directTextBlocks(card);
     const firstTop=Math.min(...controls.map(c=>rect(c).top));
-    const relevant=blocks.filter(b=>b.bottom<=firstTop+35&&b.bottom>=firstTop-700);
-    const scored=(relevant.length?relevant:blocks).sort((a,b)=>b.score-a.score||Math.abs(firstTop-b.bottom)-Math.abs(firstTop-a.bottom));
-    if(!scored.length)return "";
-    const anchor=scored[0];
-    const parts=scored.filter(b=>b.bottom<=firstTop+35&&b.top>=anchor.top-240&&b.score>=anchor.score-24).sort((a,b)=>a.top-b.top).slice(0,8).map(b=>b.text);
-    let q=flat(parts.join(" "));
-    if(q.length<8)q=anchor.text;
-    if(!QUESTION_RX.test(q)&&!/[?]$/.test(q)){
-      const lines=flat(card.innerText||card.textContent||"").split(/\n+/).map(flat).filter(x=>x.length>=5&&x.length<500&&!UI_PHRASES.test(x)&&!ACTION_RX.test(x)&&!ignored(x));
-      const qi=lines.findIndex(x=>/[?]$/.test(x)||QUESTION_RX.test(x));
-      if(qi>=0)q=flat(lines.slice(Math.max(0,qi-2),Math.min(lines.length,qi+3)).join(" "));
+    const blocks=directTextBlocks(card).filter(b=>b.bottom<=firstTop+70&&b.bottom>=firstTop-900);
+    const lines=textLines(card);
+    const visualWords=VISUAL_RX.test(lines.join(" "));
+    let candidates=[];
+    if(blocks.length){
+      for(const b of blocks){
+        let score=b.score;
+        score-=Math.max(0,firstTop-b.bottom-280)*0.08;
+        candidates.push({...b,score});
+      }
+      candidates.sort((a,b)=>b.score-a.score);
     }
-    return q.slice(0,800);
+    let q=candidates[0]?.text||"";
+    if(q){
+      const anchor=candidates[0];
+      const parts=candidates.filter(b=>b.bottom<=firstTop+70&&b.top>=anchor.top-320&&b.score>=anchor.score-28).sort((a,b)=>a.top-b.top).slice(0,8).map(b=>b.text);
+      q=flat(parts.join(" "));
+    }
+    const lineCandidates=lines.filter(x=>!controls.some(c=>labelOf(c).toLowerCase()===x.toLowerCase()));
+    const qIndex=lineCandidates.findIndex(x=>/[?]$/.test(x)||QUESTION_RX.test(x));
+    if(qIndex>=0){
+      const lineQ=flat(lineCandidates.slice(Math.max(0,qIndex-2),Math.min(lineCandidates.length,qIndex+3)).join(" "));
+      if(lineQ.length>q.length||/\?$/.test(lineQ)||(!q&&lineQ))q=lineQ;
+    }
+    if(!q&&visualWords)q=lineCandidates.find(x=>x.length>10)||"";
+    return q.slice(0,1000);
   }
   function fallbackQuestion(card,options){
     const optSet=new Set(options.map(x=>x.toLowerCase()));
-    const lines=clean(card.innerText||card.textContent||"").split(/\n+/).map(flat).filter(Boolean);
-    const usable=lines.filter(x=>x.length>=4&&x.length<=500&&!optSet.has(x.toLowerCase())&&!UI_PHRASES.test(x)&&!ACTION_RX.test(x)&&!ignored(x));
-    let idx=usable.findIndex(x=>/[?]$/.test(x));
-    if(idx<0)idx=usable.findIndex(x=>QUESTION_RX.test(x));
-    return idx>=0?flat(usable.slice(Math.max(0,idx-2),Math.min(usable.length,idx+3)).join(" ")).slice(0,800):usable.find(x=>x.length>15&&x.length<320)||"";
+    const lines=textLines(card).filter(x=>!optSet.has(x.toLowerCase()));
+    let idx=lines.findIndex(x=>/[?]$/.test(x));
+    if(idx<0)idx=lines.findIndex(x=>QUESTION_RX.test(x));
+    if(idx>=0)return flat(lines.slice(Math.max(0,idx-2),Math.min(lines.length,idx+3)).join(" ")).slice(0,1000);
+    return lines.find(x=>x.length>15&&x.length<420)||"";
   }
   function visualMeta(card){
     const imgs=[...card.querySelectorAll("img")].filter(visible).map(img=>({src:img.currentSrc||img.src,alt:flat(img.alt||img.getAttribute("aria-label")||""),width:img.naturalWidth||img.width,height:img.naturalHeight||img.height})).filter(x=>x.src);
     const canvases=[...card.querySelectorAll("canvas")].filter(visible).map(c=>{try{return {dataUrl:c.toDataURL("image/png"),width:c.width,height:c.height};}catch{return {width:c.width,height:c.height};}});
     const svg=[...card.querySelectorAll("svg")].filter(visible).length;
-    const hasVisual=imgs.length>0||canvases.length>0||svg>0||/\b(graph|diagram|image|figure|chart|plot|shown below|shown above|picture|photo|illustration)\b/i.test(textOf(card));
+    const text=flat(card.innerText||card.textContent||"");
+    const hasVisual=imgs.length>0||canvases.length>0||svg>0||VISUAL_RX.test(text);
     return {images:imgs.slice(0,6),canvases:canvases.slice(0,3),svgCount:svg,hasVisual};
   }
   function classify(controls,question,card){
@@ -154,55 +194,61 @@
     const radios=controls.filter(x=>x.matches('[role="radio"],input[type="radio"]'));
     const checks=controls.filter(x=>x.matches('[role="checkbox"],[role="switch"],input[type="checkbox"]'));
     const drags=controls.filter(x=>x.matches('[draggable="true"],[aria-grabbed="true"],[data-draggable],[data-sortable]'));
-    const opts=unique(controls.filter(x=>!isTextInput(x)).map(labelOf));
+    const selects=controls.filter(x=>x.tagName==="SELECT");
+    const opts=unique(controls.filter(x=>!isTextInput(x)&&x.tagName!=="SELECT").map(labelOf));
     const lower=(question+" "+textOf(card)).toLowerCase();
     if(drags.length||DRAG_RX.test(lower))return {type:"ordering",options:opts};
     if(checks.length>=2||/select all that apply|which of these are true|switch the toggles/i.test(lower))return {type:"multi_select",options:opts};
+    if(selects.length)return {type:"choice",options:unique([...selects.map(s=>[...s.options].map(o=>o.text).join(" | "))].filter(Boolean))};
     if(inputs.length)return {type:"text_input",options:[]};
     if(radios.length||opts.length>=2)return {type:"choice",options:opts};
     return null;
   }
   function buildActivity(card,controls){
     if(!card||!controls.length)return null;
-    const question=questionFromCard(card,controls)||fallbackQuestion(card,[]);if(!question)return null;
-    const kind=classify(controls,question,card);if(!kind)return null;
+    const provisional=questionFromCard(card,controls)||fallbackQuestion(card,[]);
+    const kind=classify(controls,provisional,card);if(!kind)return null;
     if(kind.type!=="text_input"&&kind.options.length<2)return null;
+    const question=provisional||fallbackQuestion(card,kind.options);if(!question)return null;
     const visuals=visualMeta(card);
-    const instruction=(clean(card.innerText||card.textContent||"").split(/\n+/).map(flat).find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"");
-    const activity={type:kind.type,question,options:kind.options.slice(0,12),instruction,evidence:20,visuals,cardRect:(()=>{const r=rect(card);return {left:r.left,top:r.top,width:r.width,height:r.height};})()};
+    const allText=textLines(card);
+    const instruction=allText.find(x=>ACTION_RX.test(x)||DRAG_RX.test(x))||"";
+    const r=rect(card);
+    const evidence={question:/\?$/.test(question)?3:0,keyword:QUESTION_RX.test(question)?2:0,controls:Math.min(4,controls.length),visual:visuals.hasVisual?1:0,compact:r.width<innerWidth*.97&&r.height<innerHeight*1.2?1:0};
+    const score=Object.values(evidence).reduce((a,b)=>a+b,0);
+    if(score<5)return null;
+    const activity={type:kind.type,question,options:kind.options.slice(0,12),instruction,evidence:score,visuals,cardRect:{left:r.left,top:r.top,width:r.width,height:r.height},controlCount:controls.length};
     activity.signature=signature(activity);return activity;
   }
   function detectActivity(){
     const controls=allControls();if(!controls.length)return null;
     const groups=controlGroups(controls),candidates=[];
     for(const group of groups){
-      const seed=group[0];
-      for(const card of candidateAncestors(seed,group)){
-        const local=controls.filter(c=>card.contains(c));
-        if(local.length!==group.length&&local.length>Math.max(group.length+4,8))continue;
+      if(group.length===1&&!isTextInput(group[0]))continue;
+      for(const card of candidateAncestors(group[0],group)){
         const activity=buildActivity(card,group);if(!activity)continue;
-        const r=rect(card),cr=group.map(rect);
-        const centerY=cr.reduce((n,x)=>n+x.top+x.height/2,0)/cr.length;
+        const r=rect(card),centers=group.map(rect).map(center);
+        const cy=centers.reduce((n,p)=>n+p.y,0)/centers.length;
         let rank=activity.evidence*100000;
-        rank+=Math.min(180000,group.length*22000);
-        rank+=Math.max(0,160000-Math.abs(centerY-innerHeight*.5)*1600);
-        rank-=Math.max(0,r.width*r.height-innerWidth*innerHeight*.65)/8;
-        rank-=Math.max(0,r.width-innerWidth*.95)*120;
-        if(activity.type==="text_input")rank+=40000;
-        if(activity.visuals.hasVisual)rank+=16000;
-        if(/\?$/.test(activity.question))rank+=45000;
+        rank+=Math.min(240000,group.length*26000);
+        rank+=Math.max(0,180000-Math.abs(cy-innerHeight*.52)*1800);
+        rank-=Math.max(0,r.width*r.height-innerWidth*innerHeight*.7)/7;
+        rank-=Math.max(0,r.width-innerWidth*.95)*160;
+        if(activity.type==="text_input")rank+=65000;
+        if(activity.visuals.hasVisual)rank+=22000;
+        if(/\?$/.test(activity.question))rank+=60000;
+        if(VISUAL_RX.test(activity.question))rank+=12000;
         candidates.push({activity,rank});
-        break;
       }
     }
     candidates.sort((a,b)=>b.rank-a.rank);
     const result=candidates[0]?.activity||null;
-    if(result)log("activity_detected",{type:result.type,question:result.question,optionCount:result.options.length,visual:!!result.visuals.hasVisual,groupCount:groups.length});
+    if(result)log("activity_detected",{type:result.type,question:result.question,optionCount:result.options.length,visual:!!result.visuals.hasVisual,groupCount:groups.length,controlCount:result.controlCount,evidence:result.evidence});
     return result;
   }
-  function signature(a){return [a.type,a.question,...(a.options||[]),a.instruction||"",a.visuals?.hasVisual?"visual":""].join("|").toLowerCase().replace(/\s+/g," ").slice(0,2000);}
+  function signature(a){return [a.type,a.question,...(a.options||[]),a.instruction||"",a.visuals?.hasVisual?"visual":""].join("|").toLowerCase().replace(/\s+/g," ").slice(0,2200);}
   function removeRoot(){document.getElementById(ROOT_ID)?.remove();}
-  function preview(a){const bits=[a.question];if(a.options?.length)bits.push("Options: "+a.options.join(" • "));if(a.visuals?.hasVisual)bits.push("Visual: image/graph detected");return clean(bits.join("\n")).slice(0,1000);}
+  function preview(a){const bits=[a.question];if(a.options?.length)bits.push("Options: "+a.options.join(" • "));if(a.visuals?.hasVisual)bits.push("Visual: image/graph detected");return clean(bits.join("\n")).slice(0,1100);}
   function mount(activity){
     const sig=activity.signature;if(!activity.question||sig===dismissedSignature)return;if(sig===lastSignature&&document.getElementById(ROOT_ID))return;
     lastSignature=sig;dismissedSignature="";removeRoot();
@@ -212,7 +258,7 @@
     root.querySelector(".sh-close").onclick=()=>{dismissedSignature=sig;root.remove();log("activity_dismissed",{signature:sig.slice(0,120)});};
     root.querySelector(".sh-hint").onclick=()=>analyse("hint",activity,root);root.querySelector(".sh-explain").onclick=()=>analyse("explain",activity,root);root.querySelector(".sh-answer").onclick=()=>analyse("answer",activity,root);
     root.querySelector(".sh-copy").onclick=async()=>{const t=root.querySelector(".sh-response").textContent;try{await navigator.clipboard.writeText(t);root.querySelector(".sh-copy").textContent="Copied!";setTimeout(()=>root.querySelector(".sh-copy").textContent="Copy answer",1200);log("answer_copied");}catch(e){log("copy_failed",{error:e.message});}};
-    document.documentElement.appendChild(root);log("panel_mounted",{type:activity.type,question:activity.question,visual:!!activity.visuals.hasVisual});
+    document.documentElement.appendChild(root);log("panel_mounted",{type:activity.type,question:activity.question,visual:!!activity.visuals.hasVisual,evidence:activity.evidence});
     if(contextAlive())chrome.storage.local.get(["rapidAutoAnalyse"],d=>{if(d.rapidAutoAnalyse&&!rapidAnalysed.has(sig)){rapidAnalysed.add(sig);analyse("answer",activity,root);}});
   }
   async function prepareVisuals(visuals){
@@ -234,7 +280,7 @@
     try{
       const prepared={...activity,visualInputs:await prepareVisuals(activity.visuals||{})};
       if(activity.visuals?.hasVisual){
-        const shot=await sendMessage({type:"study-helper-capture-tab"});
+        const shot=await sendMessage({type:"study-helper-capture-tab",cardRect:activity.cardRect});
         if(shot?.ok&&shot.dataUrl)prepared.visualInputs=[...prepared.visualInputs,{type:"data",data:shot.dataUrl,source:"tab-capture"}].slice(0,6);
         log("visual_capture",{ok:!!shot?.ok,sourceCount:prepared.visualInputs.length});
       }
@@ -248,16 +294,16 @@
   }
   function scan(){
     if(dead)return;
-    const now=Date.now();if(now-lastScanAt<120)return;lastScanAt=now;
+    const now=Date.now();if(now-lastScanAt<140)return;lastScanAt=now;
     const activity=detectActivity();if(!activity){pending="";pendingSince=0;return;}
     const sig=activity.signature;
-    if(sig!==pending){pending=sig;pendingSince=now;clearTimeout(debounce);debounce=setTimeout(()=>{if(dead)return;const confirmed=detectActivity();if(confirmed&&confirmed.signature===sig)mount(confirmed);},260);return;}
-    if(now-pendingSince>=160)mount(activity);
+    if(sig!==pending){pending=sig;pendingSince=now;clearTimeout(debounce);debounce=setTimeout(()=>{if(dead)return;const confirmed=detectActivity();if(confirmed&&confirmed.signature===sig)mount(confirmed);},320);return;}
+    if(now-pendingSince>=180)mount(activity);
   }
-  observer=new MutationObserver(()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,130);});
+  observer=new MutationObserver(()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140);});
   observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
-  addEventListener("scroll",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,120)},{passive:true});
-  addEventListener("resize",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,120)});
-  setTimeout(scan,500);scanTimer=setInterval(scan,700);
+  addEventListener("scroll",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140)},{passive:true});
+  addEventListener("resize",()=>{if(dead)return;clearTimeout(debounce);debounce=setTimeout(scan,140)});
+  setTimeout(scan,650);scanTimer=setInterval(scan,800);
   log("content_loaded",{version:VERSION,url:location.href});
 })();
