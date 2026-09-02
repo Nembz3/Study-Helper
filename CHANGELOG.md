@@ -1,5 +1,23 @@
 # Changelog
 
+## V4.1.0
+
+### Detection reliability
+- Improved gap-fill detection for sentence-style prompts that do not end in a question mark.
+- Added semantic question cues such as “best way”, “feature”, “purpose”, “method”, “effect”, and “difference”.
+- Added proximity evidence between the detected prompt and answer control.
+- Improved support for keyboard-accessible answer controls using `tabindex` plus semantic class/test IDs.
+- Expanded accessible control-label fallbacks using common `data-*` attributes.
+- Kept the stricter toolbar/navigation filtering to reduce false positives.
+
+### Visual questions
+- Capped visual inputs at three per AI request for better vision-model compatibility.
+- Groq now migrates older text-model defaults to the vision-capable Qwen 3.6 27B model.
+
+### AI/provider reliability
+- Groq defaults to `qwen/qwen3.6-27b` so visual questions can work with the primary provider.
+- Existing `openai/gpt-oss-20b` and retired Llama Groq defaults are migrated automatically.
+
 ## 4.0.0 — Detection & Vision Reliability
 
 ### Fixed
